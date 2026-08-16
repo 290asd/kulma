@@ -1,0 +1,8 @@
+[Unit]
+Description=Kulma - vaihda taustakuva nykyisen aurinkokulman mukaan
+
+[Service]
+Type=oneshot
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=/usr/bin/python3 %h/.local/bin/kulma_wallpaper.py

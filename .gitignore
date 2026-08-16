@@ -1,0 +1,8 @@
+# Paikallisia asetuksia ja tuotettua dataa ei kuulu committiin
+config.json
+index.json
+last_choice.json
+*.log
+
+__pycache__/
+*.pyc
