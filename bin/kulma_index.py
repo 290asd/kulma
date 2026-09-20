@@ -78,6 +78,20 @@ def _config_root() -> Path:
 
 DEFAULT_CONFIG_PATH = _config_root() / "config.json"
 DEFAULT_INDEX_PATH = _config_root() / "index.json"
+OVERRIDES_PATH = _config_root() / "overrides.json"
+
+
+def load_overrides() -> dict:
+    """Käyttäjän käsin antamat tiedot kuville, joilta EXIF puuttuu.
+
+    Muoto: {kuvan polku: {"lat": .., "lon": .., "capture_time": "VVVV-KK-PPTHH:MM:SS"}}
+    Kuvatiedostoja ei muokata.
+    """
+    try:
+        with open(OVERRIDES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def load_config(config_path: Path) -> dict:
@@ -180,11 +194,17 @@ def main():
     records = []
     skipped = 0
     mtime_fallback_files = []
+    overrides = load_overrides()
 
     for i, path in enumerate(files, 1):
         capture_dt, lat, lon = get_exif_data(path)
+        ov = overrides.get(str(path), {})
+        if "lat" in ov and "lon" in ov:
+            lat, lon = ov["lat"], ov["lon"]
 
         exif_source = "exif"
+        if "capture_time" in ov:
+            capture_dt, exif_source = datetime.fromisoformat(ov["capture_time"]), "manual"
         if capture_dt is None:
             # Ei EXIF-aikaa (tai kuvaa ei voitu avata) -> käytetään
             # tiedoston muokkausaikaa varalla. Tämä EI vastaa ottohetkeä,

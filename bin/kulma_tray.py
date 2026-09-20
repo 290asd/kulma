@@ -8,7 +8,7 @@ ja tarjoaa kuvakkeen valikon:
 
   - vasen klikkaus / "Vaihda taustakuva nyt"
   - Tauko / jatka automaattista vaihtoa
-  - Päivitä indeksi
+  - Päivitä indeksi (kysyy puuttuvat GPS-sijainnit ja ottoajat)
   - Asetukset (tkinter-ikkuna)
   - Avaa loki
   - Käynnistä Windowsin mukana
@@ -22,6 +22,7 @@ import ctypes
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -32,6 +33,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kulma_index as idx  # noqa: E402  (overrides.json ja HEIC-tuki)
 import kulma_wallpaper as wp  # noqa: E402  (jakaa polut, lokin ja valintalogiikan)
 
 DEFAULT_INTERVAL_MIN = 30
@@ -113,7 +115,7 @@ def settings_window():
         # Uusi kuvakansio (tai puuttuva indeksi) -> indeksoidaan taustalla.
         if old.get("photo_dir") != new["photo_dir"] or not wp.INDEX_PATH.exists():
             reindex()
-            messagebox.showinfo("Kulma", "Tallennettu. Indeksi päivittyy taustalla.")
+            messagebox.showinfo("Kulma", "Tallennettu. Indeksi päivittyy taustalla, ja puuttuvat tiedot kysytään sen jälkeen.")
         else:
             messagebox.showinfo("Kulma", "Tallennettu.")
         root.destroy()
@@ -125,10 +127,199 @@ def settings_window():
     root.mainloop()
 
 
+def run_index() -> subprocess.CompletedProcess:
+    """Ajaa kulma_index.py:n ja odottaa (ei konsoli-ikkunaa)."""
+    return subprocess.run([sys.executable, str(INDEX_SCRIPT)], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+                          creationflags=CREATE_NO_WINDOW)
+
+
+def reindex_and_review():
+    p = run_index()
+    if p.returncode:
+        import tkinter as tk
+        from tkinter import messagebox
+        tk.Tk().withdraw()
+        return messagebox.showerror("Kulma - indeksointi epäonnistui", (p.stderr or p.stdout)[-600:])
+    review_window()
+
+
+def geocode(text: str) -> tuple[float, float, str]:
+    """Sijainti tekstistä: "60.17, 24.94" tai paikannimi (Nominatim-haku)."""
+    m = re.fullmatch(r"\s*(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)\s*", text)
+    if m:
+        lat, lon = (float(g.replace(",", ".")) for g in m.groups())
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError("Koordinaatit ovat alueen ulkopuolella")
+        return lat, lon, f"{lat:.4f}, {lon:.4f}"
+    url = "https://nominatim.openstreetmap.org/search?" + urllib.parse.urlencode(
+        {"format": "jsonv2", "q": text, "limit": 1, "accept-language": "fi"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Kulma/1.0 (github.com/290asd/kulma)"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        found = json.load(r)
+    if not found:
+        raise ValueError(f"Paikkaa ei löytynyt: {text}")
+    return float(found[0]["lat"]), float(found[0]["lon"]), found[0]["display_name"].split(",")[0]
+
+
+def missing_records(records: list | None = None) -> list:
+    """Kuvat joilta puuttuu sijainti (GPS) tai EXIF-ottoaika.
+
+    Jokaisella kuvalla pitää olla molemmat, jotta aurinkokulma lasketaan
+    oikeaan paikkaan ja aikaan ja tiedot voidaan näyttää."""
+    if records is None:
+        try:
+            with open(wp.INDEX_PATH, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            return []
+    return [r for r in records if not r.get("gps") or r.get("time_source") == "mtime_fallback"]
+
+
+def review_window(quiet: bool = False):
+    """Näyttää kuvat joilta puuttuu GPS-sijainti tai EXIF-ottoaika ja kysyy ne
+    käyttäjältä. Vastaukset tallennetaan overrides.json:iin (kuvatiedostoja ei
+    muokata) ja indeksi ajetaan uudelleen. quiet=True: ei viestiä jos mitään ei puutu."""
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+    from PIL import Image, ImageOps, ImageTk
+
+    with open(wp.INDEX_PATH, "r", encoding="utf-8") as f:
+        records = json.load(f)
+    overrides = idx.load_overrides()
+    todo = missing_records(records)
+
+    root = tk.Tk()
+    if not todo:
+        root.withdraw()
+        if not quiet:
+            messagebox.showinfo("Kulma", f"Indeksi päivitetty ({len(records)} kuvaa). Kaikilla kuvilla on sijainti ja ottoaika.")
+        return
+    root.title("Kulma - puuttuvat sijainti- ja aikatiedot")
+
+    def remaining() -> int:
+        """Montako kuvaa on yhä ilman sijaintia tai ottoaikaa."""
+        def complete(r):
+            ov = overrides.get(r["path"], {})
+            return (r.get("gps") or "lat" in ov) and (r.get("time_source") != "mtime_fallback" or "capture_time" in ov)
+        return sum(not complete(r) for r in todo)
+
+    def finish():
+        left = remaining()
+        if left and not messagebox.askyesno(
+                "Kulma", f"{left} kuvalta puuttuu vielä sijainti tai ottoaika. Jokaisella kuvalla pitää olla molemmat.\n\n"
+                "Suljetaanko silti? Kysymme uudelleen seuraavalla käynnistyksellä ja indeksin päivityksessä."):
+            return
+        if dirty:
+            root.title("Kulma - päivitetään indeksiä…")
+            root.update()
+            run_index()
+        root.destroy()
+
+    dirty = False
+    root.protocol("WM_DELETE_WINDOW", finish)
+    frm = ttk.Frame(root, padding=10)
+    frm.grid()
+    ttk.Label(frm, wraplength=820, justify="left", text=(
+        f"Jokaisella kuvalla pitää olla sijainti ja ottoaika, jotta aurinkokulma lasketaan oikein ja tiedot "
+        f"voidaan näyttää. {len(todo)} kuvalta ne puuttuvat kokonaan tai osittain. "
+        "Valitse kuvia (Ctrl/Shift), anna sijainti ja/tai aika ja paina «Käytä valituille». "
+        "Kuvatiedostoja ei muokata.")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    tree = ttk.Treeview(frm, columns=("file", "loc", "time"), show="headings", height=14, selectmode="extended")
+    for col, title, w in (("file", "Kuva", 200), ("loc", "Sijainti", 170), ("time", "Ottoaika", 210)):
+        tree.heading(col, text=title)
+        tree.column(col, width=w)
+    tree.grid(row=1, column=0, sticky="nsew")
+    preview = ttk.Label(frm, text="Valitse kuva", anchor="center", width=45)
+    preview.grid(row=1, column=1, padx=(10, 0), sticky="nsew")
+
+    def row_values(r):
+        ov = overrides.get(r["path"], {})
+        loc = ov.get("place") or ("GPS" if r.get("gps") else "puuttuu")
+        if "capture_time" in ov:
+            when = ov["capture_time"][:16].replace("T", " ")
+        elif r.get("time_source") == "mtime_fallback":
+            when = f"puuttuu (muokattu {r['capture_time'][:16].replace('T', ' ')})"
+        else:
+            when = r["capture_time"][:16].replace("T", " ")
+        return Path(r["path"]).name, loc, when
+
+    for i, r in enumerate(todo):
+        tree.insert("", "end", iid=str(i), values=row_values(r))
+
+    def show(_=None):
+        sel = tree.selection()
+        if not sel:
+            return
+        try:
+            with Image.open(todo[int(sel[0])]["path"]) as im:
+                im = ImageOps.exif_transpose(im).convert("RGB")
+                im.thumbnail((380, 380))
+                photo = ImageTk.PhotoImage(im)
+            preview.configure(image=photo, text="")
+            preview.image = photo  # viite pidettävä, muuten kuva katoaa
+        except Exception:
+            preview.configure(image="", text="(esikatselu ei onnistu)")
+
+    tree.bind("<<TreeviewSelect>>", show)
+
+    form = ttk.Frame(frm)
+    form.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    place_var, time_var = tk.StringVar(), tk.StringVar()
+    ttk.Label(form, text="Sijainti (paikannimi tai lat, lon)").grid(row=0, column=0, sticky="w")
+    ttk.Entry(form, textvariable=place_var, width=36).grid(row=0, column=1, padx=6, pady=2)
+    ttk.Label(form, text="Ottoaika (VVVV-KK-PP HH:MM)").grid(row=1, column=0, sticky="w")
+    ttk.Entry(form, textvariable=time_var, width=36).grid(row=1, column=1, padx=6, pady=2)
+
+    def apply():
+        nonlocal dirty
+        sel = tree.selection()
+        if not sel:
+            return messagebox.showinfo("Kulma", "Valitse ensin kuvia listasta.")
+        place, when = place_var.get().strip(), time_var.get().strip()
+        if not place and not when:
+            return messagebox.showinfo("Kulma", "Anna sijainti ja/tai ottoaika.")
+        upd = {}
+        try:
+            if place:
+                upd["lat"], upd["lon"], upd["place"] = geocode(place)
+            if when:
+                for fmt in ("%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M"):
+                    try:
+                        upd["capture_time"] = datetime.strptime(when, fmt).isoformat()
+                        break
+                    except ValueError:
+                        pass
+                else:
+                    raise ValueError("Ottoajan muoto: 2019-12-25 13:30 tai 25.12.2019 13:30")
+        except Exception as e:
+            return messagebox.showerror("Kulma", str(e))
+        for iid in sel:
+            r = todo[int(iid)]
+            overrides.setdefault(r["path"], {}).update(upd)
+            tree.item(iid, values=row_values(r))
+        save_overrides()
+        dirty = True
+
+    def save_overrides():
+        idx.OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(idx.OVERRIDES_PATH, "w", encoding="utf-8") as f:
+            json.dump(overrides, f, ensure_ascii=False, indent=2)
+
+    btns = ttk.Frame(frm)
+    btns.grid(row=3, column=0, columnspan=2, sticky="e", pady=(10, 0))
+    ttk.Button(btns, text="Käytä valituille", command=apply).pack(side="left", padx=4)
+    ttk.Button(btns, text="Valmis", command=finish).pack(side="left")
+    root.mainloop()
+
+
 # --- Toiminnot ---------------------------------------------------------------
 
 def reindex():
-    subprocess.Popen([sys.executable, str(INDEX_SCRIPT)], creationflags=CREATE_NO_WINDOW)
+    """Indeksoi taustalla ja avaa sen jälkeen puuttuvien tietojen ikkunan (jos tarvitaan)."""
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--reindex-review"],
+                     creationflags=CREATE_NO_WINDOW)
 
 
 def autostart_enabled() -> bool:
@@ -192,21 +383,35 @@ def place_name(lat: float, lon: float, fetch: bool = False) -> str | None:
     return name or None
 
 
-def photo_location(fetch: bool = False) -> str | None:
-    """Nykyisen kuvan ottopaikka tekstinä, tai None jos kuvaa ei ole valittu."""
+def photo_record() -> dict | None:
+    """Nykyisen (viimeksi valitun) kuvan indeksitietue, tai None."""
     last = wp.read_last_choice()
     if not last:
         return None
     try:
         with open(wp.INDEX_PATH, "r", encoding="utf-8") as f:
-            rec = next(r for r in json.load(f) if r["path"] == last)
+            return next(r for r in json.load(f) if r["path"] == last)
     except Exception:
         return None
-    if not rec.get("gps"):
-        return "ei GPS-tietoa"
+
+
+def photo_location(fetch: bool = False) -> str | None:
+    """Nykyisen kuvan ottopaikka tekstinä, tai None jos kuvaa ei ole valittu."""
+    rec = photo_record()
+    if not rec:
+        return None
     if "lat" not in rec:
-        return "päivitä indeksi nähdäksesi sijainnin"
+        return "puuttuu - päivitä indeksi ja anna sijainti"
     return place_name(rec["lat"], rec["lon"], fetch) or f"{rec['lat']:.2f}°, {rec['lon']:.2f}°"
+
+
+def photo_time() -> str | None:
+    """Nykyisen kuvan ottoaika tekstinä (esim. "16.06.2019 klo 03:57"), tai None."""
+    rec = photo_record()
+    if not rec:
+        return None
+    when = datetime.fromisoformat(rec["capture_time"]).strftime("%d.%m.%Y klo %H:%M")
+    return when + (" (arvio: muokkausaika)" if rec.get("time_source") == "mtime_fallback" else "")
 
 
 def status_text() -> str:
@@ -226,6 +431,10 @@ def status_text() -> str:
 def main():
     if "--settings" in sys.argv:
         return settings_window()
+    if "--reindex-review" in sys.argv:
+        return reindex_and_review()
+    if "--review" in sys.argv:
+        return review_window(quiet=True)
 
     # Vain yksi tray-instanssi kerrallaan.
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -254,10 +463,17 @@ def main():
         loc = photo_location()
         return f"Sijainti: {loc}" if loc else None
 
+    def time_line() -> str | None:
+        try:
+            when = photo_time()
+        except Exception:
+            return None
+        return f"Otettu: {when}" if when else None
+
     def refresh():
         photo_location(fetch=True)  # hakee ja välimuistittaa paikannimen (verkko)
         icon.icon = make_icon(not state["paused"])
-        icon.title = "\n".join(filter(None, (status_text(), location_line())))
+        icon.title = "\n".join(filter(None, (status_text(), location_line(), time_line())))
         icon.update_menu()
 
     def change_now(*_):
@@ -299,6 +515,8 @@ def main():
             pystray.MenuItem(lambda _: status_text(), None, enabled=False),
             pystray.MenuItem(lambda _: location_line() or "", None, enabled=False,
                              visible=lambda _: bool(location_line())),
+            pystray.MenuItem(lambda _: time_line() or "", None, enabled=False,
+                             visible=lambda _: bool(time_line())),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Vaihda taustakuva nyt", change_now, default=True),
             pystray.MenuItem("Tauko", toggle_pause, checked=lambda _: state["paused"]),
@@ -317,6 +535,10 @@ def main():
         icon.visible = True
         if not wp.CONFIG_PATH.exists():
             open_settings()  # ensikäynnistys: kysytään asetukset
+        elif missing_records():
+            # Jokaisella kuvalla pitää olla sijainti ja ottoaika: kysytään puuttuvat.
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--review"],
+                             creationflags=CREATE_NO_WINDOW)
         threading.Thread(target=timer, daemon=True).start()
 
     icon.run(setup)

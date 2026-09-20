@@ -47,7 +47,7 @@ Skripti:
 
 Etsi aurinkokuvake ilmoitusalueelta (Windows 11:ssä se voi olla piilotettujen
 kuvakkeiden `^`-listassa; voit raahata sen näkyviin). Kuvakkeen päällä oleva
-vihjeteksti ja valikon kaksi ylintä riviä näyttävät auringon korkeuskulman, nykyisen kuvan ja sen ottopaikan.
+vihjeteksti ja valikon kolme ylintä riviä näyttävät auringon korkeuskulman, nykyisen kuvan sekä sen ottopaikan ja ottoajan.
 
 **Ottopaikka:** paikannimi (esim. "Helsinki, Suomi") haetaan kuvan GPS-koordinaateista OpenStreetMapin Nominatim-palvelusta. Palveluun lähetetään vain ~1 km tarkkuuteen pyöristetty sijainti, ja tulos tallennetaan välimuistiin (`%APPDATA%\Kulma\places.json`), joten sama paikka haetaan vain kerran. Jos verkkoa ei ole, näytetään koordinaatit; jos kuvassa ei ole GPS-dataa, näytetään "ei GPS-tietoa".
 
@@ -55,7 +55,7 @@ vihjeteksti ja valikon kaksi ylintä riviä näyttävät auringon korkeuskulman,
 |---|---|
 | Vasen klikkaus / **Vaihda taustakuva nyt** | Valitsee ja asettaa taustakuvan heti |
 | **Tauko** | Keskeyttää automaattisen vaihdon (kuvake harmaaksi), uusi klikkaus jatkaa |
-| **Päivitä indeksi** | Ajaa `kulma_index.py`:n taustalla (uudet kuvat mukaan) |
+| **Päivitä indeksi** | Ajaa `kulma_index.py`:n taustalla (uudet kuvat mukaan) ja kysyy sen jälkeen puuttuvat tiedot, ks. alla |
 | **Asetukset…** | Kuvakansio, sijainti, aikavyöhyke ja vaihtoväli |
 | **Avaa loki** | Avaa `kulma.log`in |
 | **Käynnistä Windowsin mukana** | Kytkee automaattikäynnistyksen päälle/pois |
@@ -66,6 +66,27 @@ avautuu itsestään. Tallennus indeksoi kuvat taustalla, kun kuvakansio on
 uusi. Sovellus lukee asetukset joka vaihdolla, joten muutokset tulevat
 voimaan ilman uudelleenkäynnistystä (vaihtovälin muutos seuraavan vaihdon
 jälkeen).
+
+### Puuttuvat sijainti- ja aikatiedot
+
+Kun indeksi päivitetään tray-valikosta (tai ensimmäisen kerran asetusten
+tallennuksen jälkeen) ja joltakin kuvalta puuttuu GPS-sijainti tai
+EXIF-ottoaika, avautuu ikkuna, jossa kuvat on listattu esikatselun kanssa.
+Valitse kuvia (Ctrl/Shift), kirjoita **sijainti** (paikannimi, esim. `Turku`,
+tai koordinaatit `60.45, 22.27`) ja/tai **ottoaika** (`2019-06-16 03:57` tai
+`16.06.2019 03:57`) ja paina *Käytä valituille*. *Valmis* ajaa indeksoinnin
+uudelleen uusilla tiedoilla, jolloin aurinkokulma lasketaan oikeaan paikkaan
+ja aikaan.
+
+**Jokaisella kuvalla pitää olla sijainti ja ottoaika.** Jos ikkunan sulkee kun tietoja
+vielä puuttuu, sovellus varoittaa ja kysyy ne uudelleen seuraavassa käynnistyksessä
+ja indeksin päivityksessä. Nykyisen kuvan ottopaikka ja ottoaika näkyvät tray-valikossa
+ja kuvakkeen vihjetekstissä.
+
+Tiedot tallennetaan tiedostoon `%APPDATA%\Kulma\overrides.json` - **kuvatiedostoja
+ei muokata**. Paikannimen haku käyttää OpenStreetMapin Nominatim-palvelua
+(lähetetään vain kirjoittamasi hakuteksti). Yöllinen ajastettu indeksointi
+käyttää samoja tietoja mutta ei avaa ikkunaa.
 
 ### Lisäasetukset (config.json)
 
@@ -124,6 +145,8 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
   config.json            # asetukset
   index.json              # kuvaindeksi
   last_choice.json        # edellinen valinta
+  overrides.json          # käsin annetut sijainnit ja ottoajat
+  places.json             # paikannimien välimuisti
   kulma.log               # lokitiedosto
 ```
 
