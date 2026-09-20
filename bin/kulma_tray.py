@@ -120,6 +120,9 @@ def settings_window():
     ttk.Label(frm, text=tr("set.language")).grid(row=len(fields), column=0, sticky="w", pady=3)
     ttk.Combobox(frm, textvariable=lang_var, values=list(i18n.LANGUAGES.values()), state="readonly",
                  width=20).grid(row=len(fields), column=1, sticky="w", pady=3, padx=6)
+    lock_var = tk.BooleanVar(value=cfg.get("lock_screen", True))
+    ttk.Checkbutton(frm, text=tr("set.lockscreen"), variable=lock_var).grid(
+        row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=3)
 
     def browse():
         d = filedialog.askdirectory(initialdir=vars_["photo_dir"].get() or None)
@@ -137,6 +140,7 @@ def settings_window():
                 "timezone": vars_["timezone"].get().strip(),
                 "interval_minutes": max(1, int(vars_["interval_minutes"].get())),
                 "language": next(k for k, v in i18n.LANGUAGES.items() if v == lang_var.get()),
+                "lock_screen": lock_var.get(),
             }
             ZoneInfo(new["timezone"])
             if not Path(new["photo_dir"]).is_dir():
@@ -158,7 +162,7 @@ def settings_window():
         root.destroy()
 
     btns = ttk.Frame(frm)
-    btns.grid(row=len(fields) + 1, column=0, columnspan=3, pady=(10, 0), sticky="e")
+    btns.grid(row=len(fields) + 2, column=0, columnspan=3, pady=(10, 0), sticky="e")
     ttk.Button(btns, text=tr("set.save"), command=save).pack(side="left", padx=4)
     ttk.Button(btns, text=tr("set.cancel"), command=root.destroy).pack(side="left")
     root.mainloop()
@@ -588,6 +592,99 @@ def status_text() -> str:
         return tr("status.nosettings")
 
 
+def boost_process():
+    """Keeps the tray process responsive right after waking up: slightly higher priority and
+    no EcoQoS/power throttling (Windows may otherwise slow down background processes)."""
+    try:
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        me = k32.GetCurrentProcess()
+        k32.SetPriorityClass(ctypes.c_void_p(me), 0x8000)  # ABOVE_NORMAL_PRIORITY_CLASS
+
+        class PROCESS_POWER_THROTTLING_STATE(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+
+        state = PROCESS_POWER_THROTTLING_STATE(1, 1, 0)  # control execution-speed throttling, state 0 = off
+        k32.SetProcessInformation(ctypes.c_void_p(me), 4, ctypes.byref(state), ctypes.sizeof(state))  # 4 = ProcessPowerThrottling
+    except Exception:
+        pass
+
+
+def sync_lock_screen():
+    """Makes the lock screen match the current desktop photo (if enabled in the settings)."""
+    last = wp.read_last_choice()
+    if last and load_config().get("lock_screen", True):
+        try:
+            wp.set_lock_screen(wp.get_display_path(Path(last)))
+        except Exception as e:  # e.g. the photo has been deleted
+            wp.log(tr("err.tray", e=e))
+
+
+def watch_power(on_wake):
+    """Runs a hidden window with its own message loop (call in a thread) that reports power events:
+    the display turning on (this is how a wake from Modern Standby shows up) and the classic
+    resume-from-sleep messages. on_wake() is called for each of them."""
+    from ctypes import wintypes as w
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", w.DWORD), ("Data2", w.WORD), ("Data3", w.WORD), ("Data4", ctypes.c_ubyte * 8)]
+
+    class POWERBROADCAST_SETTING(ctypes.Structure):
+        _fields_ = [("PowerSetting", GUID), ("DataLength", w.DWORD), ("Data", ctypes.c_ubyte * 1)]
+
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+
+    class WNDCLASS(ctypes.Structure):
+        _fields_ = [("style", w.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
+                    ("cbWndExtra", ctypes.c_int), ("hInstance", w.HINSTANCE), ("hIcon", w.HANDLE),
+                    ("hCursor", w.HANDLE), ("hbrBackground", w.HANDLE), ("lpszMenuName", w.LPCWSTR),
+                    ("lpszClassName", w.LPCWSTR)]
+
+    # GUID_CONSOLE_DISPLAY_STATE {6FE69556-704A-47A0-8F24-C28D936FDA47}: data 0 = off, 1 = on, 2 = dimmed
+    display_guid = GUID(0x6FE69556, 0x704A, 0x47A0,
+                        (ctypes.c_ubyte * 8)(0x8F, 0x24, 0xC2, 0x8D, 0x93, 0x6F, 0xDA, 0x47))
+    WM_POWERBROADCAST, PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC, PBT_POWERSETTINGCHANGE = 0x218, 0x7, 0x12, 0x8013
+
+    user32.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_ssize_t
+    user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
+    user32.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
+    user32.CreateWindowExW.restype = w.HWND
+    user32.RegisterPowerSettingNotification.argtypes = [w.HANDLE, ctypes.POINTER(GUID), w.DWORD]
+    user32.RegisterPowerSettingNotification.restype = w.HANDLE
+    user32.GetMessageW.argtypes = [ctypes.POINTER(w.MSG), w.HWND, w.UINT, w.UINT]
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(w.MSG)]
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(w.MSG)]
+    kernel32.GetModuleHandleW.restype = w.HINSTANCE
+
+    def wndproc(hwnd, msg, wparam, lparam):
+        if msg == WM_POWERBROADCAST:
+            try:
+                if wparam in (PBT_APMRESUMESUSPEND, PBT_APMRESUMEAUTOMATIC):
+                    on_wake()
+                elif wparam == PBT_POWERSETTINGCHANGE and lparam:
+                    setting = ctypes.cast(lparam, ctypes.POINTER(POWERBROADCAST_SETTING)).contents
+                    if bytes(setting.PowerSetting) == bytes(display_guid) and setting.Data[0] == 1:
+                        on_wake()
+            except Exception:
+                pass  # a message handler must never raise
+            return 1
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    callback = WNDPROC(wndproc)  # a reference must be kept, otherwise the callback is garbage collected
+    cls = WNDCLASS(0, callback, 0, 0, kernel32.GetModuleHandleW(None), None, None, None, None, "KulmaPowerWatcher")
+    user32.RegisterClassW(ctypes.byref(cls))
+    hwnd = user32.CreateWindowExW(0, "KulmaPowerWatcher", "Kulma", 0, 0, 0, 0, 0, None, None, cls.hInstance, None)
+    user32.RegisterPowerSettingNotification(hwnd, ctypes.byref(display_guid), 0)  # 0 = DEVICE_NOTIFY_WINDOW_HANDLE
+    msg = w.MSG()
+    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+
+
 def main():
     try:  # the taskbar groups the windows as Kulma instead of pythonw
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Kulma.Tray")
@@ -605,6 +702,8 @@ def main():
     k32.CreateMutexW(None, False, "Kulma-Tray")
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
         return
+
+    boost_process()
 
     import pystray
     from PIL import Image, ImageDraw
@@ -632,7 +731,7 @@ def main():
         return img
 
     lock = threading.Lock()
-    state = {"paused": False}
+    state = {"paused": False, "last_change": time.time()}
     wake = threading.Event()  # wakes the timer in the middle of its wait
 
     def location_line() -> str | None:
@@ -655,6 +754,7 @@ def main():
 
     def change_now(*_):
         with lock:
+            state["last_change"] = time.time()
             try:
                 wp.main()
             except SystemExit:
@@ -677,7 +777,19 @@ def main():
     def open_settings(*_):
         p = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--settings"])
         # When the settings window closes, refresh the menu and tooltip (e.g. a changed language).
-        threading.Thread(target=lambda: (p.wait(), refresh()), daemon=True).start()
+        threading.Thread(target=lambda: (p.wait(), refresh(), sync_lock_screen()), daemon=True).start()
+
+    def on_wake():
+        """The screen turned on or the system resumed: if a change is already due (the timer could not
+        run while asleep), do it right away. The lock screen helper is pre-warmed in parallel."""
+        interval = max(1, int(load_config().get("interval_minutes", DEFAULT_INTERVAL_MIN))) * 60
+        elapsed = time.time() - state["last_change"]
+        if state["paused"] or lock.locked() or wake.is_set() or elapsed < interval:
+            return
+        if load_config().get("lock_screen", True):
+            wp.prewarm_lock_helper()
+        wp.log(tr("tray.resumed", sec=int(elapsed)))
+        wake.set()  # the timer thread changes the wallpaper immediately
 
     def quit_app(*_):
         wake.set()
@@ -719,6 +831,7 @@ def main():
         if not wp.CONFIG_PATH.exists():
             open_settings()  # first start: ask for the settings
         threading.Thread(target=timer, daemon=True).start()
+        threading.Thread(target=watch_power, args=(on_wake,), daemon=True).start()
 
     icon.run(setup)
 

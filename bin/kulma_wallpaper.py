@@ -30,16 +30,21 @@ Selection principle:
      candidate is already in use, the nearest other photos are used so that
      changing always succeeds.
 
+On Windows the same photo is also set as the lock screen image (unless
+"lock_screen": false in config.json).
+
 Run on a schedule: on Linux through a systemd timer (see systemd/kulma.timer),
 on Windows by the tray app (see windows/README_WINDOWS.md).
 """
 
+import base64
 import ctypes
 import json
 import os
 import random
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -251,6 +256,106 @@ def set_windows_wallpaper(path: Path):
         )
 
 
+# --- Windows lock screen -----------------------------------------------------
+# The lock screen image is set through the WinRT API LockScreen.SetImageFileAsync
+# (no admin rights needed; it also switches the lock screen from "Windows
+# Spotlight" to "Picture"). The API call itself takes ~0.25 s, but starting
+# PowerShell takes ~1 s, so a small PowerShell helper process is kept running
+# and fed image paths (base64, one per line) through its stdin. It is started
+# on demand (or pre-warmed when the screen turns on, see prewarm_lock_helper)
+# and closed again after LOCK_HELPER_IDLE_SECONDS of inactivity.
+LOCK_HELPER_IDLE_SECONDS = 60
+LOCK_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asOp = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+$asAction = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' })[0]
+[void][Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+[void][Windows.System.UserProfile.LockScreen, Windows.System.UserProfile, ContentType = WindowsRuntime]
+while (($line = [Console]::In.ReadLine()) -ne $null) {
+    try {
+        $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line))
+        $task = $asOp.MakeGenericMethod([Windows.Storage.StorageFile]).Invoke($null, @([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)))
+        $task.Wait(-1) | Out-Null
+        $asAction.Invoke($null, @([Windows.System.UserProfile.LockScreen]::SetImageFileAsync($task.Result))).Wait(-1) | Out-Null
+    } catch {
+        Add-Content -LiteralPath $env:KULMA_LOG -Value ('[{0}] Lock screen update failed: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $_.Exception.Message)
+    }
+}
+"""
+_lock_proc = None
+_lock_idle_timer = None
+_lock_guard = threading.Lock()
+
+
+def _ensure_lock_helper():
+    """Returns the running PowerShell helper, starting it if needed (call with _lock_guard held)."""
+    global _lock_proc
+    if _lock_proc is None or _lock_proc.poll() is not None:
+        encoded = base64.b64encode(LOCK_SCRIPT.encode("utf-16-le")).decode()
+        _lock_proc = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-EncodedCommand", encoded],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            env={**os.environ, "KULMA_LOG": str(LOG_PATH)},
+        )
+    return _lock_proc
+
+
+def _close_lock_helper():
+    global _lock_proc
+    with _lock_guard:
+        if _lock_proc is not None:
+            try:
+                _lock_proc.stdin.close()  # EOF: the helper finishes pending work and exits
+            except (OSError, ValueError):
+                pass
+            _lock_proc = None
+
+
+def _restart_idle_timer():
+    global _lock_idle_timer
+    if _lock_idle_timer is not None:
+        _lock_idle_timer.cancel()
+    _lock_idle_timer = threading.Timer(LOCK_HELPER_IDLE_SECONDS, _close_lock_helper)
+    _lock_idle_timer.daemon = True  # must not keep a one-shot run alive
+    _lock_idle_timer.start()
+
+
+def prewarm_lock_helper():
+    """Starts the PowerShell helper ahead of time so that set_lock_screen() is fast (Windows only)."""
+    if sys.platform != "win32":
+        return
+    with _lock_guard:
+        try:
+            _ensure_lock_helper()
+            _restart_idle_timer()
+        except OSError:
+            pass
+
+
+def set_lock_screen(path: Path):
+    """Sets the Windows lock screen image (asynchronously; failures are logged by the helper)."""
+    global _lock_proc
+    if sys.platform != "win32":
+        return
+    line = base64.b64encode(str(path.resolve()).encode("utf-8")) + b"\n"
+    with _lock_guard:
+        for attempt in range(2):  # a dead helper (broken pipe) is replaced once
+            try:
+                proc = _ensure_lock_helper()
+                proc.stdin.write(line)
+                proc.stdin.flush()
+                _restart_idle_timer()
+                return
+            except (OSError, ValueError):
+                _lock_proc = None
+        log(tr("wp.err_lock"))
+
+
 def set_wallpaper(path: Path):
     """Sets the wallpaper in the way that suits the operating system."""
     if sys.platform == "win32":
@@ -360,6 +465,8 @@ def main():
 
     try:
         set_wallpaper(display_path)
+        if sys.platform == "win32" and config.get("lock_screen", True):
+            set_lock_screen(display_path)  # the lock screen always matches the desktop
         write_last_choice(str(chosen_path), (history + [chosen_record["path"]])[-HISTORY_LIMIT:])
         conversion_note = tr("wp.conv_note", name=display_path.name) if display_path != chosen_path else ""
         log(tr("wp.chosen", elev=current_elev, az=current_az, name=chosen_path.name, conv=conversion_note,

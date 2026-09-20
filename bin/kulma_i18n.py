@@ -82,6 +82,7 @@ STRINGS = {
         "set.tz": "Aikavyöhyke",
         "set.interval": "Vaihtoväli (min)",
         "set.language": "Kieli",
+        "set.lockscreen": "Päivitä myös lukitusruutu (sama kuva kuin työpöydällä)",
         "set.browse": "Selaa…",
         "set.save": "Tallenna",
         "set.cancel": "Peruuta",
@@ -144,6 +145,7 @@ STRINGS = {
         "err.coords_range": "Koordinaatit ovat alueen ulkopuolella",
         "err.place_not_found": "Paikkaa ei löytynyt: {text}",
         "err.tray": "Tray: virhe taustakuvan vaihdossa: {e}",
+        "tray.resumed": "Herätty lepotilasta tai näyttö päälle ({sec} s edellisestä vaihdosta) - vaihdetaan taustakuva heti",
         # --- kulma_wallpaper.py (log) ---
         "wp.err_config": "Virhe: config-tiedostoa ei löydy ({path}).",
         "wp.err_index": "Virhe: indeksiä ei löydy ({path}). Aja ensin kulma_index.py.",
@@ -159,6 +161,7 @@ STRINGS = {
             "valittu kuva: {name}{conv} (kuvan kulma {photo_elev:.1f}°, "
             "ero {diff:.1f}°) | {mode}, {n} ehdokasta"),
         "wp.err_set": "Virhe asetettaessa taustakuvaa: {e}",
+        "wp.err_lock": "Lukitusruudun päivitys epäonnistui (apuprosessia ei saatu käynnistettyä).",
         # --- kulma_index.py (output) ---
         "idx.warn_heif": (
             "HUOM: pillow-heif ei ole asennettu - HEIC/HEIF-kuvien EXIF-data "
@@ -212,6 +215,7 @@ STRINGS = {
         "set.tz": "Time zone",
         "set.interval": "Change interval (min)",
         "set.language": "Language",
+        "set.lockscreen": "Also update the lock screen (same photo as the desktop)",
         "set.browse": "Browse…",
         "set.save": "Save",
         "set.cancel": "Cancel",
@@ -274,6 +278,7 @@ STRINGS = {
         "err.coords_range": "Coordinates are out of range",
         "err.place_not_found": "Place not found: {text}",
         "err.tray": "Tray: error while changing the wallpaper: {e}",
+        "tray.resumed": "Woke up from sleep or screen turned on ({sec} s since the last change) - changing the wallpaper right away",
         # --- kulma_wallpaper.py (log) ---
         "wp.err_config": "Error: config file not found ({path}).",
         "wp.err_index": "Error: index not found ({path}). Run kulma_index.py first.",
@@ -289,6 +294,7 @@ STRINGS = {
             "chosen photo: {name}{conv} (photo elevation {photo_elev:.1f}°, "
             "diff {diff:.1f}°) | {mode}, {n} candidates"),
         "wp.err_set": "Error setting the wallpaper: {e}",
+        "wp.err_lock": "Updating the lock screen failed (could not start the helper process).",
         # --- kulma_index.py (output) ---
         "idx.warn_heif": (
             "NOTE: pillow-heif is not installed - the EXIF data (capture time, GPS) of "

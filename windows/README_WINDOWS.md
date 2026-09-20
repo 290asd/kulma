@@ -80,7 +80,7 @@ the menu says it is missing.
 | Left click / **Change wallpaper now** | Chooses and sets a wallpaper right away. Changing can be continued endlessly: photos are cycled (all current candidates are gone through before any repeats) and a new round starts by itself |
 | **Pause** | Pauses the automatic change (the icon turns grey), another click resumes |
 | **Update index** | Runs `kulma_index.py` in the background (new photos included) and afterwards asks for the missing details, see below |
-| **Settings…** | Photo folder, location, time zone, change interval and **language** (Suomi / English). A language change takes effect as soon as the settings window is closed |
+| **Settings…** | Photo folder, location, time zone, change interval, **language** (Suomi / English) and whether the **lock screen** is updated too. A language change takes effect as soon as the settings window is closed |
 | **Open log** | Opens `kulma.log` |
 | **Start with Windows** | Turns automatic startup on/off |
 | **About…** | A window with the icon, the version number, the versions of the libraries used, photo library statistics (number of photos, location known / missing, capture time missing, number of incomplete photos and the 3 most common locations) and a link to GitHub. The version is `__version__` in `kulma_tray.py`. The names of the most common locations are looked up from Nominatim when needed (max 3 lookups, cached) |
@@ -90,6 +90,26 @@ On the first start (when `config.json` is missing) the settings window opens by
 itself. Saving indexes the photos in the background when the photo folder is
 new. The app reads the settings at every change, so changes take effect without
 a restart (a change of the interval after the next change).
+
+### Lock screen and waking up
+
+By default the **lock screen shows the same photo as the desktop**: every time the
+wallpaper changes, the photo is also set as the lock screen image (untick "Also
+update the lock screen" in the settings to turn this off, or set
+`"lock_screen": false` in `config.json`). The first time, Windows switches the
+lock screen from "Windows Spotlight" to "Picture"; turning the option off does
+not switch it back. The lock screen is set through the Windows Runtime API
+`LockScreen.SetImageFileAsync` (no admin rights) by a small PowerShell helper
+process that is started on demand and closed again after a minute of inactivity.
+
+The app does not prevent the computer from sleeping. While the PC sleeps
+(Modern Standby) nothing can run, so when it **wakes up** - the screen turns on
+or the system resumes - the app checks whether a change is already due (the
+change interval has passed since the last change) and if so changes the
+wallpaper and the lock screen immediately, and starts the lock screen helper in
+parallel to save about a second. The app also runs with slightly raised
+priority and without power throttling, so that it gets CPU time quickly after
+waking. The log line "Woke up from sleep or screen turned on" marks such a change.
 
 ### Missing location and time details
 
@@ -132,6 +152,7 @@ notepad "$env:APPDATA\Kulma\config.json"
   "timezone": "Europe/Helsinki",
   "interval_minutes": 30,
   "language": "en",
+  "lock_screen": true,
   "elevation_tolerance": 6.0,
   "twilight_elevation_tolerance": 3.0,
   "twilight_band": 12.0,
@@ -141,6 +162,7 @@ notepad "$env:APPDATA\Kulma\config.json"
 
 The explanations of the fields are the same as in the main project README.
 `interval_minutes` is the change interval of the tray app (default 30).
+`lock_screen` (default `true`) sets the desktop photo as the lock screen image too.
 `language` is the language of the user interface, `"fi"` (default when the key
 is missing) or `"en"`; the language choice in the settings window saves it. All
 the texts of the app (tray menu, windows, log and indexing output) are in

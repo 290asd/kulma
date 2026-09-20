@@ -93,6 +93,7 @@ the timers later.
 | Field | Description |
 |---|---|
 | `photo_dir` | Photo folder, walked through recursively including subfolders. **Not** the script folder. |
+| `lock_screen` | Windows only (default `true`): also set the chosen photo as the lock screen image. |
 | `language` | Language of the texts: `fi` (default) or `en`. Affects the log and the indexing output (in the Windows tray app also the menu and windows). The texts are in `bin/kulma_i18n.py`. |
 | `latitude` / `longitude` | Your location. Used to calculate the current sun elevation, and by default for photos that have no GPS EXIF of their own. |
 | `timezone` | IANA time zone (e.g. `Europe/Helsinki`). EXIF does not contain a time zone, so this is used to interpret the capture times of the photos correctly. |
