@@ -289,6 +289,12 @@ def main():
         log("Indeksissä ei ole yhtään olemassa olevaa kuvaa. Aja kulma_index.py uudelleen.")
         return
 
+    # Vain kuvat joilla on sijainti ja oikea ottoaika (EXIF tai käsin annettu):
+    # muuten kuvan aurinkokulma on arvaus (kotisijainti / tiedoston muokkausaika).
+    # Jos yhdelläkään kuvalla ei ole, käytetään kaikkia jotta valinta ei jää tyhjäksi.
+    complete = [r for r in records if r.get("gps") and r.get("time_source") != "mtime_fallback"]
+    records = complete or records
+
     def score(r):
         elev_diff = abs(r["sun_elevation"] - current_elev)
         az_diff = circular_diff(r["sun_azimuth"], current_az)

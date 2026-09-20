@@ -20,6 +20,8 @@ vertaa sitä nykyiseen aurinkokulmaan valitessaan taustakuvaa.
    valitsee indeksistä kuvan jonka tallennettu kulma on lähimpänä —
    painotetulla satunnaisvalinnalla, jotta valinta vaihtelee muttei ole
    täysin sattumanvarainen. Sama kuva ei voi tulla kahdesti peräkkäin.
+   Valintaan otetaan vain kuvat joilla on sijainti (GPS) ja ottoaika;
+   muut jätetään pois, koska niiden aurinkokulma olisi arvaus.
 3. Kaksi systemd-timeria ajaa nämä automaattisesti: taustakuva vaihtuu
    oletuksena kerran tunnissa, ja indeksi päivittyy öisin uusien kuvien
    varalta.
@@ -212,9 +214,13 @@ rm -rf ~/.cache/kulma/converted
   kokoelmalla moni ajo turvautuu varajärjestelmään (lähimmät ehdokkaat
   toleranssin ulkopuolelta).
 - GPS-EXIF puuttuu monista kuvista (esim. jos sijaintitiedot on
-  poistettu jakamisen yhteydessä) — näille käytetään config.jsonin
-  oletussijaintia, mikä on riittävän tarkka jos kuvat on otettu lähellä
-  kotia, mutta ei täysin tarkka matkakuville.
+  poistettu jakamisen yhteydessä). Tällaiset kuvat (ja kuvat joilta puuttuu
+  EXIF-ottoaika) jätetään pois taustakuvavalinnasta, kunnes sijainti ja aika
+  on annettu käsin: Windowsissa tray-sovellus kysyy ne, Linuxissa lisää ne
+  tiedostoon `~/.config/kulma/overrides.json`
+  (`{"<kuvan polku>": {"lat": 60.17, "lon": 24.94, "capture_time": "2019-06-16T03:57:00"}}`)
+  ja aja `kulma_index.py` uudelleen. Jos yhdelläkään kuvalla ei ole tietoja,
+  käytetään kaikkia kuvia (sijaintina config.jsonin oletussijainti).
 
 ## Lisenssi
 

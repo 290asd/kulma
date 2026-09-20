@@ -78,9 +78,11 @@ tai koordinaatit `60.45, 22.27`) ja/tai **ottoaika** (`2019-06-16 03:57` tai
 uudelleen uusilla tiedoilla, jolloin aurinkokulma lasketaan oikeaan paikkaan
 ja aikaan.
 
-**Jokaisella kuvalla pitää olla sijainti ja ottoaika.** Jos ikkunan sulkee kun tietoja
-vielä puuttuu, sovellus varoittaa ja kysyy ne uudelleen seuraavassa käynnistyksessä
-ja indeksin päivityksessä. Nykyisen kuvan ottopaikka ja ottoaika näkyvät tray-valikossa
+**Jokaisella kuvalla pitää olla sijainti ja ottoaika.** Kuvat, joilta ne puuttuvat,
+jätetään automaattisesti pois taustakuvavalinnasta kunnes tiedot on annettu. Jos
+ikkunan sulkee kun tietoja vielä puuttuu, sovellus varoittaa. Ikkuna avautuu vain
+ensimmäisessä indeksoinnissa ja aina kun indeksin päivitys ajetaan käsin valikosta;
+sovelluksen käynnistys tai yöllinen indeksointi ei kysy mitään. Nykyisen kuvan ottopaikka ja ottoaika näkyvät tray-valikossa
 ja kuvakkeen vihjetekstissä.
 
 Tiedot tallennetaan tiedostoon `%APPDATA%\Kulma\overrides.json` - **kuvatiedostoja

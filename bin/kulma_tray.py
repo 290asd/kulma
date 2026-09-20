@@ -162,24 +162,18 @@ def geocode(text: str) -> tuple[float, float, str]:
     return float(found[0]["lat"]), float(found[0]["lon"]), found[0]["display_name"].split(",")[0]
 
 
-def missing_records(records: list | None = None) -> list:
+def missing_records(records: list) -> list:
     """Kuvat joilta puuttuu sijainti (GPS) tai EXIF-ottoaika.
 
     Jokaisella kuvalla pitää olla molemmat, jotta aurinkokulma lasketaan
     oikeaan paikkaan ja aikaan ja tiedot voidaan näyttää."""
-    if records is None:
-        try:
-            with open(wp.INDEX_PATH, "r", encoding="utf-8") as f:
-                records = json.load(f)
-        except Exception:
-            return []
     return [r for r in records if not r.get("gps") or r.get("time_source") == "mtime_fallback"]
 
 
-def review_window(quiet: bool = False):
+def review_window():
     """Näyttää kuvat joilta puuttuu GPS-sijainti tai EXIF-ottoaika ja kysyy ne
     käyttäjältä. Vastaukset tallennetaan overrides.json:iin (kuvatiedostoja ei
-    muokata) ja indeksi ajetaan uudelleen. quiet=True: ei viestiä jos mitään ei puutu."""
+    muokata) ja indeksi ajetaan uudelleen."""
     import tkinter as tk
     from tkinter import messagebox, ttk
     from PIL import Image, ImageOps, ImageTk
@@ -192,8 +186,7 @@ def review_window(quiet: bool = False):
     root = tk.Tk()
     if not todo:
         root.withdraw()
-        if not quiet:
-            messagebox.showinfo("Kulma", f"Indeksi päivitetty ({len(records)} kuvaa). Kaikilla kuvilla on sijainti ja ottoaika.")
+        messagebox.showinfo("Kulma", f"Indeksi päivitetty ({len(records)} kuvaa). Kaikilla kuvilla on sijainti ja ottoaika.")
         return
     root.title("Kulma - puuttuvat sijainti- ja aikatiedot")
 
@@ -208,7 +201,7 @@ def review_window(quiet: bool = False):
         left = remaining()
         if left and not messagebox.askyesno(
                 "Kulma", f"{left} kuvalta puuttuu vielä sijainti tai ottoaika. Jokaisella kuvalla pitää olla molemmat.\n\n"
-                "Suljetaanko silti? Kysymme uudelleen seuraavalla käynnistyksellä ja indeksin päivityksessä."):
+                "Suljetaanko silti? Ne jätetään pois taustakuvavalinnasta, kunnes tiedot on annettu."):
             return
         if dirty:
             root.title("Kulma - päivitetään indeksiä…")
@@ -222,7 +215,8 @@ def review_window(quiet: bool = False):
     frm.grid()
     ttk.Label(frm, wraplength=820, justify="left", text=(
         f"Jokaisella kuvalla pitää olla sijainti ja ottoaika, jotta aurinkokulma lasketaan oikein ja tiedot "
-        f"voidaan näyttää. {len(todo)} kuvalta ne puuttuvat kokonaan tai osittain. "
+        f"voidaan näyttää. {len(todo)} kuvalta ne puuttuvat kokonaan tai osittain, ja ne jätetään pois "
+        "taustakuvavalinnasta kunnes tiedot on annettu. "
         "Valitse kuvia (Ctrl/Shift), anna sijainti ja/tai aika ja paina «Käytä valituille». "
         "Kuvatiedostoja ei muokata.")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
@@ -433,8 +427,6 @@ def main():
         return settings_window()
     if "--reindex-review" in sys.argv:
         return reindex_and_review()
-    if "--review" in sys.argv:
-        return review_window(quiet=True)
 
     # Vain yksi tray-instanssi kerrallaan.
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -535,10 +527,6 @@ def main():
         icon.visible = True
         if not wp.CONFIG_PATH.exists():
             open_settings()  # ensikäynnistys: kysytään asetukset
-        elif missing_records():
-            # Jokaisella kuvalla pitää olla sijainti ja ottoaika: kysytään puuttuvat.
-            subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--review"],
-                             creationflags=CREATE_NO_WINDOW)
         threading.Thread(target=timer, daemon=True).start()
 
     icon.run(setup)
