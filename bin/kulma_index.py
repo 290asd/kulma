@@ -2,32 +2,37 @@
 """
 kulma_index.py
 
-Käy läpi kuvakansion (rekursiivisesti) ja laskee jokaiselle kuvalle
-auringon korkeuskulman (elevation) ja atsimuutin (azimuth) sillä hetkellä
-kun kuva on otettu (EXIF DateTimeOriginal).
+Walks through the photo folder (recursively) and calculates, for every photo,
+the sun elevation and azimuth at the moment the photo was taken (EXIF
+DateTimeOriginal).
 
-Sijainti kuvalle:
-  1. Jos kuvassa on GPS-EXIF (GPSLatitude/GPSLongitude), käytetään sitä.
-  2. Muuten käytetään config.jsonin oletussijaintia.
+Location of a photo:
+  1. If the photo has GPS EXIF (GPSLatitude/GPSLongitude), that is used.
+  2. Otherwise the default location from config.json is used.
 
-Kellonaika tulkitaan config.jsonin aikavyöhykkeen mukaan (EXIF ei
-yleensä sisällä aikavyöhykettä).
+The time is interpreted in the time zone from config.json (EXIF normally
+does not contain a time zone).
 
-Tulos tallennetaan JSON-tiedostoon (index.json) litteänä listana:
+Values entered by hand (overrides.json, see load_overrides) take precedence
+over EXIF data.
+
+The result is saved as a flat list in a JSON file (index.json):
 [
   {
-    "path": "/polku/kuva1.jpg",
+    "path": "/path/photo1.jpg",
     "capture_time": "2024-06-01T14:32:00+03:00",
     "hour": 14,
     "sun_elevation": 23.41,
     "sun_azimuth": 210.07,
     "gps": true,
-    "time_source": "exif"
+    "lat": 60.17,
+    "lon": 24.94,
+    "time_source": "exif"        # "exif", "manual" or "mtime_fallback"
   },
   ...
 ]
 
-Käyttö:
+Usage:
     python3 kulma_index.py [--config ~/.config/kulma/config.json]
 """
 
@@ -57,18 +62,17 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
 DATETIME_ORIGINAL_TAG = next((k for k, v in TAGS.items() if v == "DateTimeOriginal"), None)
 DATETIME_TAG = next((k for k, v in TAGS.items() if v == "DateTime"), None)
 
-# IFD-pointterit ("get_ifd"-avaimet) - näiden alle EXIF- ja GPS-tiedot on
-# pakattu Pillow'n nykyisessä rajapinnassa (koskee sekä JPEG:iä että
-# HEIC/HEIF:iä pillow-heif:in kautta). Vanha yksityinen _getexif() ei
-# toimi HEIC:in kanssa lainkaan.
+# IFD pointers ("get_ifd" keys) - the EXIF and GPS data are packed under these
+# in Pillow's current API (applies to both JPEG and, via pillow-heif,
+# HEIC/HEIF). The old private _getexif() does not work with HEIC at all.
 EXIF_IFD_POINTER = 0x8769   # "Exif IFD"
 GPS_IFD_POINTER = 0x8825    # "GPS IFD"
 
 def _config_root() -> Path:
-    """Kulman asetuskansio - käyttöjärjestelmäkohtainen.
+    """Kulma's settings folder - depends on the operating system.
 
-    Linux/macOS: ~/.config/kulma  (XDG-käytäntö)
-    Windows:     %APPDATA%\\Kulma  (esim. C:\\Users\\nimi\\AppData\\Roaming\\Kulma)
+    Linux/macOS: ~/.config/kulma  (XDG convention)
+    Windows:     %APPDATA%\\Kulma  (e.g. C:\\Users\\name\\AppData\\Roaming\\Kulma)
     """
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
@@ -82,10 +86,10 @@ OVERRIDES_PATH = _config_root() / "overrides.json"
 
 
 def load_overrides() -> dict:
-    """Käyttäjän käsin antamat tiedot kuville, joilta EXIF puuttuu.
+    """Details entered by hand for photos that lack EXIF data.
 
-    Muoto: {kuvan polku: {"lat": .., "lon": .., "capture_time": "VVVV-KK-PPTHH:MM:SS"}}
-    Kuvatiedostoja ei muokata.
+    Format: {photo path: {"lat": .., "lon": .., "capture_time": "YYYY-MM-DDTHH:MM:SS"}}
+    The photo files themselves are never modified.
     """
     try:
         with open(OVERRIDES_PATH, "r", encoding="utf-8") as f:
@@ -112,10 +116,10 @@ def _dms_to_decimal(dms, ref) -> float:
 
 
 def get_exif_data(path: Path):
-    """Palauttaa (capture_dt: datetime|None, lat: float|None, lon: float|None).
+    """Returns (capture_dt: datetime|None, lat: float|None, lon: float|None).
 
-    Käyttää Pillow'n julkista getexif()/get_ifd()-rajapintaa, joka toimii
-    yhtenäisesti sekä JPEG- että HEIC/HEIF-kuville.
+    Uses Pillow's public getexif()/get_ifd() API, which works the same way
+    for both JPEG and HEIC/HEIF photos.
     """
     capture_dt = None
     lat = lon = None
@@ -133,8 +137,8 @@ def get_exif_data(path: Path):
                 except ValueError:
                     pass
 
-            # Joskus ottoaika löytyy vain "top level" IFD:stä (tag 306,
-            # "DateTime") HEIC:eissä joissa ei ole erillistä Exif-IFD:tä
+            # Sometimes the capture time is only found in the "top level" IFD
+            # (tag 306, "DateTime") in HEIC files that have no separate Exif IFD
             if capture_dt is None and DATETIME_ORIGINAL_TAG in exif:
                 raw = exif[DATETIME_ORIGINAL_TAG]
                 try:
@@ -142,10 +146,10 @@ def get_exif_data(path: Path):
                 except ValueError:
                     pass
 
-            # Jotkin kamerat (esim. osa Android-puhelimista) eivät tallenna
-            # "DateTimeOriginal"-tagia lainkaan, vain yleisen "DateTime"-tagin
-            # (306) top-level IFD:ssä. Käytetään sitä viimeisenä yrityksenä
-            # ennen tiedoston muokkausaikaan turvautumista.
+            # Some cameras (e.g. some Android phones) do not store the
+            # "DateTimeOriginal" tag at all, only the generic "DateTime" tag
+            # (306) in the top-level IFD. Use it as a last attempt before
+            # falling back to the file modification time.
             if capture_dt is None and DATETIME_TAG in exif:
                 raw = exif[DATETIME_TAG]
                 try:
@@ -168,9 +172,9 @@ def get_exif_data(path: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Indeksoi kuvat aurinkokulman mukaan (Kulma)")
+    parser = argparse.ArgumentParser(description="Index photos by sun angle (Kulma)")
     parser.add_argument("photo_dir", type=str, nargs="?", default=None,
-                         help="Kuvakansio (oletus: config.jsonin photo_dir)")
+                         help="Photo folder (default: photo_dir from config.json)")
     parser.add_argument("--config", type=str, default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--out", type=str, default=str(DEFAULT_INDEX_PATH))
     args = parser.parse_args()
@@ -206,9 +210,9 @@ def main():
         if "capture_time" in ov:
             capture_dt, exif_source = datetime.fromisoformat(ov["capture_time"]), "manual"
         if capture_dt is None:
-            # Ei EXIF-aikaa (tai kuvaa ei voitu avata) -> käytetään
-            # tiedoston muokkausaikaa varalla. Tämä EI vastaa ottohetkeä,
-            # joten merkitään selvästi ja varoitetaan lopuksi.
+            # No EXIF time (or the photo could not be opened) -> fall back to
+            # the file modification time. This does NOT match the capture
+            # moment, so it is marked clearly and a warning is printed at the end.
             capture_dt = datetime.fromtimestamp(path.stat().st_mtime)
             exif_source = "mtime_fallback"
             mtime_fallback_files.append(path)

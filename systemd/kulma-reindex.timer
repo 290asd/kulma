@@ -1,5 +1,5 @@
 [Unit]
-Description=Aja kulma-reindex.service joka yö
+Description=Run kulma-reindex.service every night
 
 [Timer]
 OnCalendar=*-*-* 03:30:00

@@ -1,5 +1,5 @@
 [Unit]
-Description=Aja kulma.service säännöllisesti
+Description=Run kulma.service regularly
 
 [Timer]
 OnCalendar=*-*-* *:00:00

@@ -1,41 +1,41 @@
 <#
 .SYNOPSIS
-    Kulma - Windows-poistoskripti
+    Kulma - Windows uninstall script
 
 .DESCRIPTION
-    Sulkee tray-sovelluksen, poistaa sen automaattikaynnistyksen ja Task
-    Scheduler -tehtavat 'Kulma' ja 'Kulma-Reindex'. Ei poista
-    asetuksia, kuvaindeksia eika lokia ($env:APPDATA\Kulma) eika
-    JPEG-muunnosvalimuistia ($env:LOCALAPPDATA\Kulma\cache) - poista ne
-    kasin jos haluat siivota kokonaan.
+    Closes the tray app, removes its autostart entry and Start Menu shortcut,
+    and removes the Task Scheduler tasks 'Kulma' and 'Kulma-Reindex'. Does not
+    delete settings, the photo index or the log ($env:APPDATA\Kulma), nor the
+    JPEG conversion cache and icon ($env:LOCALAPPDATA\Kulma) - delete those
+    by hand if you want a full cleanup.
 #>
 
 $ErrorActionPreference = "SilentlyContinue"
 
-Write-Host "Kulma - poistetaan tray-sovellus ja Task Scheduler -tehtavat"
+Write-Host "Kulma - removing the tray app and Task Scheduler tasks"
 
 Get-CimInstance Win32_Process -Filter "Name LIKE 'pythonw%'" |
     Where-Object { $_.CommandLine -like "*kulma_tray.py*" } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "-> Tray-sovellus suljettu" }
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "-> Tray app closed" }
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Kulma" -ErrorAction SilentlyContinue
-Write-Host "-> Automaattikaynnistys poistettu"
+Write-Host "-> Autostart removed"
 Remove-Item (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Kulma.lnk") -ErrorAction SilentlyContinue
-Write-Host "-> Kaynnistys-valikon pikakuvake poistettu"
+Write-Host "-> Start Menu shortcut removed"
 
 
 foreach ($name in @("Kulma", "Kulma-Reindex")) {
     $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
     if ($task) {
         Unregister-ScheduledTask -TaskName $name -Confirm:$false
-        Write-Host "-> Poistettu: $name"
+        Write-Host "-> Removed: $name"
     } else {
-        Write-Host "-> Ei loytynyt (jo poistettu?): $name"
+        Write-Host "-> Not found (already removed?): $name"
     }
 }
 
 Write-Host ""
-Write-Host "Poisto valmis. Skriptit ($env:LOCALAPPDATA\Kulma\bin), asetukset"
-Write-Host "ja indeksi ($env:APPDATA\Kulma) jaivat paikoilleen - poista ne kasin"
-Write-Host "jos haluat siivota kokonaan:"
+Write-Host "Uninstall complete. The scripts ($env:LOCALAPPDATA\Kulma\bin), settings"
+Write-Host "and index ($env:APPDATA\Kulma) were left in place - delete them by hand"
+Write-Host "for a full cleanup:"
 Write-Host "  Remove-Item -Recurse -Force `"$env:LOCALAPPDATA\Kulma`""
 Write-Host "  Remove-Item -Recurse -Force `"$env:APPDATA\Kulma`""

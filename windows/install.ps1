@@ -1,30 +1,31 @@
 <#
 .SYNOPSIS
-    Kulma - Windows-asennusskripti
+    Kulma - Windows install script
 
 .DESCRIPTION
-    Kopioi skriptit paikoilleen, asentaa riippuvuudet, kaynnistaa tray-sovelluksen
-    (kulma_tray.py, aurinkokuvake ilmoitusalueella) ja lisaa sen Windowsin
-    kaynnistykseen. Tray-sovellus vaihtaa taustakuvan ajastetusti ja tarjoaa
-    asetusikkunan. Lisaksi rekisteroidaan Task Scheduler -tehtava:
+    Copies the scripts into place, installs the dependencies, creates the app
+    icon, starts the tray app (kulma_tray.py, sun icon in the notification area)
+    and adds it to Windows startup plus a Start Menu shortcut. The tray app
+    changes the wallpaper on a schedule and provides a settings window.
+    A Task Scheduler task is also registered:
 
-      Kulma-Reindex   - paivittaa kuvaindeksin joka yo klo 03:30
+      Kulma-Reindex   - updates the photo index every night at 03:30
 
-    Vanha "Kulma"-ajastettu tehtava (taustakuvan vaihto) poistetaan, koska
-    tray-sovellus korvaa sen.
+    The old "Kulma" scheduled task (wallpaper change) is removed, because the
+    tray app replaces it.
 
 .NOTES
-    Ei vaadi järjestelmänvalvojan oikeuksia - tehtävät rekisteröidään
-    nykyiselle käyttäjälle (Register-ScheduledTask ilman -User-parametria
-    käyttää oletuksena suorittavaa käyttäjää suorittaessaan interaktiivisena).
+    Does not require administrator rights - the tasks are registered for the
+    current user (Register-ScheduledTask without -User runs as the current
+    user, interactively).
 #>
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "Kulma - Windows-asennus"
+Write-Host "Kulma - Windows install"
 Write-Host "======================="
 
-# --- Polut -----------------------------------------------------------------
+# --- Paths -------------------------------------------------------------------
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $ScriptDir
@@ -35,15 +36,14 @@ $ConfigDir = Join-Path $env:APPDATA "Kulma"
 New-Item -ItemType Directory -Force -Path $BinDir    | Out-Null
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
-# --- Python-tulkin etsintä ---------------------------------------------------
-# pythonw.exe ajaa skriptin ilman että konsoli-ikkuna välähtää näkyviin joka
-# 30 min - se on samassa kansiossa kuin python.exe normaalisti (venv tai
-# python.org-asennus). Jos sitä ei löydy, käytetään python.exe:tä (toimii
-# yhtä lailla, mutta Task Schedulerin ajossa saattaa näkyä hetken konsoli).
+# --- Locating the Python interpreter -----------------------------------------
+# pythonw.exe runs the script without a console window flashing up. It normally
+# sits in the same folder as python.exe (venv or python.org install). If it is
+# not found, python.exe is used (works just as well, but a console may flash).
 
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCmd) {
-    Write-Error "python.exe ei löydy PATH:sta. Asenna Python (python.org) ja varmista 'Add python.exe to PATH' asennuksen aikana, tai avaa uusi PowerShell-ikkuna asennuksen jälkeen."
+    Write-Error "python.exe was not found on PATH. Install Python (python.org) and tick 'Add python.exe to PATH' during setup, or open a new PowerShell window after installing."
     exit 1
 }
 $pythonExe  = $pythonCmd.Source
@@ -51,77 +51,78 @@ $pythonwExe = Join-Path (Split-Path $pythonExe) "pythonw.exe"
 if (-not (Test-Path $pythonwExe)) {
     $pythonwExe = $pythonExe
 }
-Write-Host "-> Python-tulkki: $pythonwExe"
+Write-Host "-> Python interpreter: $pythonwExe"
 
-# --- Tiedostojen kopiointi ---------------------------------------------------
+# --- Copying files -----------------------------------------------------------
 
 Copy-Item (Join-Path $RepoRoot "bin\kulma_index.py")     $BinDir -Force
 Copy-Item (Join-Path $RepoRoot "bin\kulma_wallpaper.py") $BinDir -Force
 Copy-Item (Join-Path $RepoRoot "bin\kulma_tray.py")      $BinDir -Force
 Copy-Item (Join-Path $RepoRoot "bin\kulma_i18n.py")      $BinDir -Force
-Write-Host "-> Skriptit kopioitu: $BinDir"
+Write-Host "-> Scripts copied: $BinDir"
 
 $configPath = Join-Path $ConfigDir "config.json"
 if (Test-Path $configPath) {
-    Write-Host "-> config.json on jo olemassa, ei ylikirjoiteta ($configPath)"
+    Write-Host "-> config.json already exists, not overwriting ($configPath)"
 }
-# Jos config.json puuttuu, tray-sovellus avaa asetusikkunan ensikaynnistyksessa.
+# If config.json is missing, the tray app opens the settings window on first start.
 
-# --- Riippuvuudet -------------------------------------------------------------
+# --- Dependencies ------------------------------------------------------------
 
 Write-Host ""
-Write-Host "-> Asennetaan/varmistetaan Python-riippuvuudet (astral, Pillow, pillow-heif, pystray)..."
+Write-Host "-> Installing/verifying Python dependencies (astral, Pillow, pillow-heif, pystray)..."
 & $pythonExe -m pip install --quiet astral Pillow pillow-heif pystray
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "pip install epaonnistui - asenna riippuvuudet manuaalisesti: $pythonExe -m pip install astral Pillow pillow-heif pystray"
+    Write-Warning "pip install failed - install the dependencies manually: $pythonExe -m pip install astral Pillow pillow-heif pystray"
 }
 
-# --- Kuvake ---------------------------------------------------------------------
-# 📐☀️-kuvake luodaan Applen emoji-kuvista (ladataan tassa, ei ole repossa).
-# Jos lataus epaonnistuu, tray kayttaa piirrettya oletuskuvaketta.
+# --- Icon --------------------------------------------------------------------
+# The set square + sun icon is created from Apple emoji images (downloaded here,
+# not stored in the repo). If the download fails, the tray app uses a drawn
+# fallback icon.
 & $pythonExe (Join-Path $ScriptDir "make_icon.py")
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Kuvakkeen luonti epaonnistui (ei verkkoa?) - kaytetaan oletuskuvaketta. Voit yrittaa uudelleen: python windows\make_icon.py"
+    Write-Warning "Creating the icon failed (no network?) - using the fallback icon. You can retry with: python windows\make_icon.py"
 }
 $iconPath = Join-Path $env:LOCALAPPDATA "Kulma\icon\kulma.ico"
 
-# --- Task Scheduler -----------------------------------------------------------
+# --- Task Scheduler ----------------------------------------------------------
 
 $reindexScript   = Join-Path $BinDir "kulma_index.py"
 
-# Kulma: taustakuvan vaihdon hoitaa tray-sovellus (kulma_tray.py), joka
-# kaynnistyy Windowsin mukana (HKCU Run). Vanha "Kulma"-ajastettu tehtava
-# poistetaan, ettei taustakuva vaihtuisi kahteen kertaan.
+# Kulma: the wallpaper change is handled by the tray app (kulma_tray.py), which
+# starts with Windows (HKCU Run). The old "Kulma" scheduled task is removed so
+# that the wallpaper does not change twice.
 if (Get-ScheduledTask -TaskName "Kulma" -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName "Kulma" -Confirm:$false
-    Write-Host "-> Vanha Task Scheduler -tehtava 'Kulma' poistettu (tray korvaa sen)"
+    Write-Host "-> Old Task Scheduler task 'Kulma' removed (the tray app replaces it)"
 }
 
 $trayScript = Join-Path $BinDir "kulma_tray.py"
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Kulma" `
     -Value "`"$pythonwExe`" `"$trayScript`""
-Write-Host "-> Tray-sovellus kaynnistyy Windowsin mukana"
+Write-Host "-> The tray app starts with Windows"
 
-# Kaynnistysvalikon pikakuvake, jotta sovelluksen saa kaynnistettya uudelleen
-# (esim. valikon "Lopeta"-valinnan jalkeen) ilman kirjautumista uudelleen.
+# Start Menu shortcut, so that the app can be restarted (e.g. after choosing
+# "Quit" from the menu) without logging out and in again.
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut(
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Kulma.lnk"))
 $lnk.TargetPath       = $pythonwExe
 $lnk.Arguments        = "`"$trayScript`""
 $lnk.WorkingDirectory = $BinDir
-$lnk.Description      = "Kulma - taustakuva auringon korkeuskulman mukaan"
+$lnk.Description      = "Kulma - wallpaper that follows the sun angle"
 if (Test-Path $iconPath) { $lnk.IconLocation = "$iconPath,0" }
 $lnk.Save()
-Write-Host "-> Pikakuvake lisatty Kaynnistys-valikkoon (hae 'Kulma')"
+Write-Host "-> Shortcut added to the Start Menu (search for 'Kulma')"
 
-# Uudelleenasennuksessa vanha tray-instanssi pitaa sulkea ennen kuin uusi kaynnistetaan.
+# On reinstall, close the old tray instance before starting the new one.
 Get-CimInstance Win32_Process -Filter "Name LIKE 'pythonw%'" |
     Where-Object { $_.CommandLine -like "*kulma_tray.py*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-Process $pythonwExe -ArgumentList "`"$trayScript`""
-Write-Host "-> Tray-sovellus kaynnistetty (aurinkokuvake ilmoitusalueella)"
+Write-Host "-> Tray app started (sun icon in the notification area)"
 
-# Kulma-Reindex: kuvaindeksin paivitys joka yo klo 03:30.
+# Kulma-Reindex: photo index update every night at 03:30.
 $reindexAction  = New-ScheduledTaskAction -Execute $pythonwExe -Argument "`"$reindexScript`""
 $reindexTrigger = New-ScheduledTaskTrigger -Daily -At "03:30"
 $reindexSettings = New-ScheduledTaskSettingsSet `
@@ -131,13 +132,13 @@ $reindexSettings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask -TaskName "Kulma-Reindex" `
     -Action $reindexAction -Trigger $reindexTrigger -Settings $reindexSettings `
-    -Description "Paivittaa Kulman kuvaindeksin (aurinkokulmat) joka yo." `
+    -Description "Updates the Kulma photo index (sun angles) every night." `
     -Force | Out-Null
-Write-Host "-> Task Scheduler -tehtava 'Kulma-Reindex' rekisteroity (paivittain 03:30)"
+Write-Host "-> Task Scheduler task 'Kulma-Reindex' registered (daily at 03:30)"
 
 Write-Host ""
-Write-Host "Seuraavaksi:"
-Write-Host "  1. Etsi aurinkokuvake ilmoitusalueelta (voi olla piilotettujen kuvakkeiden ^-listassa)."
-Write-Host "  2. Jos config.json puuttui, asetusikkuna avautui itsestaan - tayta kuvakansio ja sijainti."
-Write-Host "     Tallennus kaynnistaa indeksoinnin taustalla. Muuten: kuvake -> Asetukset."
-Write-Host "  3. Vasen klikkaus kuvakkeeseen vaihtaa taustakuvan heti."
+Write-Host "Next steps:"
+Write-Host "  1. Find the sun icon in the notification area (it may be in the hidden-icons ^ list)."
+Write-Host "  2. If config.json was missing, the settings window opened by itself - fill in the photo folder and location."
+Write-Host "     Saving starts indexing in the background. Otherwise: icon -> Settings."
+Write-Host "  3. Left-click the icon to change the wallpaper right away."

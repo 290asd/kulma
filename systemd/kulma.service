@@ -1,5 +1,5 @@
 [Unit]
-Description=Kulma - vaihda taustakuva nykyisen aurinkokulman mukaan
+Description=Kulma - change the wallpaper to match the current sun angle
 
 [Service]
 Type=oneshot

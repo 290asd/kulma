@@ -1,4 +1,4 @@
-# Paikallisia asetuksia ja tuotettua dataa ei kuulu committiin
+# Local settings and generated data do not belong in commits
 config.json
 index.json
 last_choice.json

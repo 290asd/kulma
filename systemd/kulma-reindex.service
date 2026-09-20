@@ -1,5 +1,5 @@
 [Unit]
-Description=Kulma - päivitä kuvaindeksi (aurinkokulmat)
+Description=Kulma - update the photo index (sun angles)
 
 [Service]
 Type=oneshot

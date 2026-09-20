@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-kulma_i18n.py - Kulman käyttöliittymätekstit suomeksi ja englanniksi.
+kulma_i18n.py - Kulma's user interface texts in Finnish and English.
 
-Kieli luetaan config.jsonin avaimesta "language" ("fi" tai "en"). Jos avainta ei
-ole, käytetään suomea (vanhat asennukset pysyvät entisellään).
+The language is read from the "language" key of config.json ("fi" or "en").
+If the key is missing, Finnish is used (old installs stay as they were).
 
-Käyttö:
+Usage:
     from kulma_i18n import t
     t("menu.quit")                    # -> "Lopeta" / "Quit"
     t("status.sun", elev=28.6, name="x.jpg")
 
-Tekstit ovat str.format-muotoisia ({nimi}-paikkamerkit). Puuttuva englanninkielinen
-teksti korvautuu suomenkielisellä. Koodin kommentit ja docstringit ovat suomeksi.
+The texts are in str.format style ({name} placeholders). A missing English
+text falls back to the Finnish one. When adding a text, add both languages.
 """
 
 import json
@@ -34,7 +34,7 @@ _lang: str | None = None
 
 
 def reload() -> str:
-    """Lukee kielen config.jsonista uudelleen (kutsu kun asetukset ovat voineet muuttua)."""
+    """Re-reads the language from config.json (call when the settings may have changed)."""
     global _lang
     try:
         with open(_config_path(), "r", encoding="utf-8") as f:
@@ -56,7 +56,7 @@ def t(key: str, **kw) -> str:
 
 STRINGS = {
     "fi": {
-        # --- tray-valikko ---
+        # --- tray menu ---
         "menu.change": "Vaihda taustakuva nyt",
         "menu.pause": "Tauko",
         "menu.reindex": "Päivitä indeksi",
@@ -65,7 +65,7 @@ STRINGS = {
         "menu.autostart": "Käynnistä Windowsin mukana",
         "menu.about": "Tietoja…",
         "menu.quit": "Lopeta",
-        # --- tila- ja tietorivit ---
+        # --- status and info lines ---
         "status.sun": "Aurinko {elev:.1f}° · {name}",
         "status.none": "ei vielä valintaa",
         "status.nosettings": "Kulma - asetukset puuttuvat",
@@ -74,7 +74,7 @@ STRINGS = {
         "time.line": "Otettu: {when}",
         "time.estimate": " (arvio: muokkausaika)",
         "time.fmt": "%d.%m.%Y klo %H:%M",
-        # --- asetusikkuna ---
+        # --- settings window ---
         "set.title": "Kulma - asetukset",
         "set.photo_dir": "Kuvakansio",
         "set.lat": "Leveysaste",
@@ -89,7 +89,7 @@ STRINGS = {
         "set.nofolder": "Kuvakansiota ei löydy: {path}",
         "set.saved": "Tallennettu.",
         "set.saved_reindex": "Tallennettu. Indeksi päivittyy taustalla, ja puuttuvat tiedot kysytään sen jälkeen.",
-        # --- tietoja-ikkuna ---
+        # --- about window ---
         "about.title": "Kulma - tietoja",
         "about.version": "Versio {v}",
         "about.desc": "Vaihtaa työpöydän taustakuvan kuvaan, joka on otettu samanlaisessa auringonvalossa kuin juuri nyt.",
@@ -112,7 +112,7 @@ STRINGS = {
         "about.place_n": "{name}: {n} kuvaa ({pct})",
         "about.credits": "Paikannimet: OpenStreetMap Nominatim. Kuvake: kulmaviivain ja aurinko, Applen emoji-kuvista.",
         "about.close": "Sulje",
-        # --- puuttuvien tietojen ikkuna ---
+        # --- missing details window ---
         "rev.title": "Kulma - puuttuvat sijainti- ja aikatiedot",
         "rev.updating": "Kulma - päivitetään indeksiä…",
         "rev.intro": (
@@ -139,12 +139,12 @@ STRINGS = {
             "{n} kuvalta puuttuu vielä sijainti tai ottoaika. Jokaisella kuvalla pitää olla molemmat.\n\n"
             "Suljetaanko silti? Ne jätetään pois taustakuvavalinnasta, kunnes tiedot on annettu."),
         "rev.all_ok": "Indeksi päivitetty ({n} kuvaa). Kaikilla kuvilla on sijainti ja ottoaika.",
-        # --- virheet ---
+        # --- errors ---
         "err.index_failed": "Kulma - indeksointi epäonnistui",
         "err.coords_range": "Koordinaatit ovat alueen ulkopuolella",
         "err.place_not_found": "Paikkaa ei löytynyt: {text}",
         "err.tray": "Tray: virhe taustakuvan vaihdossa: {e}",
-        # --- kulma_wallpaper.py (loki) ---
+        # --- kulma_wallpaper.py (log) ---
         "wp.err_config": "Virhe: config-tiedostoa ei löydy ({path}).",
         "wp.err_index": "Virhe: indeksiä ei löydy ({path}). Aja ensin kulma_index.py.",
         "wp.no_photos": "Indeksissä ei ole yhtään olemassa olevaa kuvaa. Aja kulma_index.py uudelleen.",
@@ -159,7 +159,7 @@ STRINGS = {
             "valittu kuva: {name}{conv} (kuvan kulma {photo_elev:.1f}°, "
             "ero {diff:.1f}°) | {mode}, {n} ehdokasta"),
         "wp.err_set": "Virhe asetettaessa taustakuvaa: {e}",
-        # --- kulma_index.py (tuloste) ---
+        # --- kulma_index.py (output) ---
         "idx.warn_heif": (
             "HUOM: pillow-heif ei ole asennettu - HEIC/HEIF-kuvien EXIF-data "
             "(ottoaika, GPS) ei ole luettavissa. Asenna: pip install pillow-heif "

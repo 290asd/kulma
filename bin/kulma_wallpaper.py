@@ -2,36 +2,36 @@
 """
 kulma_wallpaper.py
 
-Laskee auringon korkeuskulman JUURI NYT (config.jsonin sijainnille), ja
-valitsee kuvaindeksistä kuvan jonka tallennettu aurinkokulma (kuvan
-ottohetkellä) on lähimpänä nykyistä. Toimii täysin automaattisesti, ei
-vaadi manuaalista säätöä käytön aikana.
+Calculates the sun elevation RIGHT NOW (for the location in config.json) and
+picks, from the photo index, a photo whose stored sun angle (at the moment the
+photo was taken) is closest to the current one. Works fully automatically, no
+manual tuning is needed during use.
 
-Valintaperiaate:
-  1. Lasketaan nykyinen aurinkokulma (elevation) ja atsimuutti (azimuth).
-  2. Otetaan kaikki kuvat, joiden elevation on toleranssin sisällä
-     nykyisestä. Toleranssi on tiukempi ("twilight_elevation_tolerance")
-     kun ollaan lähellä horisonttia ("twilight_band" astetta nollasta),
-     koska valon voimakkuus muuttuu siellä nopeasti asteen kohden -
-     ilman tätä yöllä saattaisi valikoitua selvästi kirkkaampia
-     päiväkuvia vaikka numeerinen ero olisi pieni.
-  3. Näistä valitaan satunnaisesti painotettuna niin, että lähempänä
-     nykyistä kulmaa (ja atsimuuttia) olevat kuvat ovat todennäköisempiä.
-     Painotus on neliöllinen (ei lineaarinen), joten kaukaisemmat mutta
-     silti toleranssin sisällä olevat kuvat valikoituvat vain harvoin -
-     tämä estää sen että valinta tuntuisi "satunnaiselta" vaikka teknisesti
-     kelvollisia mutta selvästi huonompia ehdokkaita olisi joukossa.
-  4. Jos yksikään kuva ei osu toleranssin sisään (esim. harva kuvamäärä),
-     otetaan lähimmät ehdokkaat varajärjestelmänä - jokin kuva vaihtuu
-     joka kerta, valinta ei koskaan jää tyhjäksi.
-  5. Ehdokkaita kierrätetään: jo näytetyt kuvat suljetaan pois kunnes kaikki
-     nykyiset ehdokkaat on käyty läpi, minkä jälkeen alkaa uusi kierros.
-     Edellinen kuva ei voi tulla kahdesti peräkkäin; jos ainoa ehdokas on jo
-     käytössä, haetaan lähimmät muut kuvat, jotta vaihto onnistuu aina.
+Selection principle:
+  1. Calculate the current sun elevation and azimuth.
+  2. Take all photos whose elevation is within the tolerance of the current
+     one. The tolerance is stricter ("twilight_elevation_tolerance") near the
+     horizon (within "twilight_band" degrees of zero), because the light
+     intensity changes quickly per degree there - without this, clearly
+     brighter daytime photos could be chosen at night even though the
+     numeric difference is small.
+  3. Choose among these randomly, weighted so that photos closer to the
+     current elevation (and azimuth) are more likely. The weighting is
+     quadratic (not linear), so more distant photos that are still within
+     the tolerance are chosen only rarely - this prevents the choice from
+     feeling "random" even though technically valid but clearly worse
+     candidates are in the pool.
+  4. If no photo falls within the tolerance (e.g. a small collection), the
+     nearest candidates are used as a fallback - something changes every
+     time, the choice never ends up empty.
+  5. Candidates are cycled: photos already shown are excluded until all
+     current candidates have been gone through, after which a new round
+     starts. The previous photo cannot come twice in a row; if the only
+     candidate is already in use, the nearest other photos are used so that
+     changing always succeeds.
 
-Ajetaan ajastettuna: Linuxilla systemd-timerin kautta (katso
-systemd/kulma.timer), Windowsilla Task Schedulerin kautta (katso
-windows/install.ps1).
+Run on a schedule: on Linux through a systemd timer (see systemd/kulma.timer),
+on Windows by the tray app (see windows/README_WINDOWS.md).
 """
 
 import ctypes
@@ -58,7 +58,7 @@ from astral.sun import elevation, azimuth
 from kulma_i18n import t as tr
 
 def _config_root() -> Path:
-    """Kulman asetuskansio - käyttöjärjestelmäkohtainen.
+    """Kulma's settings folder - depends on the operating system.
 
     Linux/macOS: ~/.config/kulma
     Windows:     %APPDATA%\\Kulma
@@ -70,7 +70,7 @@ def _config_root() -> Path:
 
 
 def _cache_root() -> Path:
-    """Kulman välimuistikansio (HEIC->JPEG-muunnokset) - käyttöjärjestelmäkohtainen.
+    """Kulma's cache folder (HEIC->JPEG conversions) - depends on the operating system.
 
     Linux/macOS: ~/.cache/kulma
     Windows:     %LOCALAPPDATA%\\Kulma\\cache
@@ -88,8 +88,8 @@ LAST_CHOICE_PATH = _config_root() / "last_choice.json"
 CONVERTED_CACHE_DIR = _cache_root() / "converted"
 
 HEIC_EXTENSIONS = {".heic", ".heif"}
-FALLBACK_CANDIDATE_COUNT = 3  # jos mikään kuva ei osu toleranssiin
-HISTORY_LIMIT = 500           # kierroshistorian enimmäispituus
+FALLBACK_CANDIDATE_COUNT = 3  # if no photo falls within the tolerance
+HISTORY_LIMIT = 500           # maximum length of the round history
 
 
 def log(msg: str):
@@ -113,7 +113,7 @@ def read_last_choice() -> str | None:
 
 
 def read_history() -> list[str]:
-    """Nykyisellä "kierroksella" jo näytetyt kuvat (ks. main())."""
+    """Photos already shown in the current "round" (see main())."""
     try:
         with open(LAST_CHOICE_PATH, "r", encoding="utf-8") as f:
             return list(json.load(f).get("history", []))
@@ -131,26 +131,26 @@ def write_last_choice(path: str, history: list[str] | None = None):
 
 
 def circular_diff(a: float, b: float) -> float:
-    """Pienin ero kahden atsimuuttikulman välillä (0-360 -asteikolla)."""
+    """Smallest difference between two azimuth angles (on a 0-360 scale)."""
     d = abs(a - b) % 360
     return min(d, 360 - d)
 
 
 def get_display_path(path: Path) -> Path:
-    """Palauttaa polun jota käyttöjärjestelmä voi käyttää taustakuvana.
+    """Returns a path the operating system can use as a wallpaper.
 
-    Sekä GNOME:n taustakuvan renderöinti (gdk-pixbuf) että Windowsin
-    SystemParametersInfoW eivät tue HEIC/HEIF-formaattia (Linuxilla
-    puuttuu patenttisyistä oletusasennuksesta, Windowsilla API ei tue
-    sitä lainkaan), vaikka tämä skripti itse pystyy lukemaan
-    HEIC-tiedostojen EXIF-datan pillow-heif:in kautta. Jos HEIC-polku
-    annettaisiin suoraan, komento "onnistuu" mutta työpöytä ei näytä
-    mitään uutta - jää vanhaan kuvaan kiinni.
+    Neither GNOME's wallpaper rendering (gdk-pixbuf) nor Windows'
+    SystemParametersInfoW support the HEIC/HEIF format (on Linux it is
+    missing from the default install for patent reasons, on Windows the API
+    does not support it at all), even though this script itself can read the
+    EXIF data of HEIC files through pillow-heif. If a HEIC path were given
+    directly, the command would "succeed" but the desktop would show nothing
+    new - it would stay stuck on the old photo.
 
-    Siksi HEIC/HEIF-kuvat muunnetaan JPEG-välimuistiin ennen taustakuvaksi
-    asettamista. Muunnos tehdään vain kerran per kuva (välimuistitiedosto
-    nimetään alkuperäisen mukaan) - toistuvilla ajoilla käytetään jo
-    muunnettua tiedostoa.
+    Therefore HEIC/HEIF photos are converted into a JPEG cache before being
+    set as the wallpaper. The conversion is done only once per photo (the
+    cache file is named after the original) - later runs use the already
+    converted file.
     """
     if path.suffix.lower() not in HEIC_EXTENSIONS:
         return path
@@ -168,27 +168,27 @@ def get_display_path(path: Path) -> Path:
 
 
 def set_gnome_wallpaper(path: Path):
-    """Asettaa GNOME-taustakuvan ja pakottaa uudelleenpiirron.
+    """Sets the GNOME wallpaper and forces a redraw.
 
-    Tunnettu GNOME Shell -kummallisuus: pelkkä "gsettings set picture-uri"
-    ei aina pakota näkyvää taustakuvaa päivittymään heti - GNOME Shell voi
-    jäädä näyttämään vanhaa, jo piirrettyä taustakuvaa kunnes jokin muu
-    tapahtuma (esim. virtuaalityöpöydän vaihto) pakottaa sen rakentamaan
-    taustakuva-actorin uudelleen. Syynä on todennäköisesti se, että
-    "picture-options" pysyy samana arvona joka ajolla ("zoom" -> "zoom"),
-    jolloin dconf ei laukaise muutossignaalia sille eikä GNOME Shell näin
-    ollen aina rekonstruoi taustaa kokonaan pelkän URI-muutoksen takia.
+    A known GNOME Shell quirk: a plain "gsettings set picture-uri" does not
+    always make the visible wallpaper update immediately - GNOME Shell may
+    keep showing the old, already drawn wallpaper until some other event
+    (e.g. switching virtual desktops) forces it to rebuild the background
+    actor. The cause is probably that "picture-options" keeps the same value
+    on every run ("zoom" -> "zoom"), so dconf does not emit a change signal
+    for it and GNOME Shell does not always reconstruct the background just
+    because of a URI change.
 
-    Korjataan pakottamalla picture-options vaihtumaan välillä eri arvoon
-    ja takaisin joka ajolla - tämä laukaisee aidon "changed"-signaalin ja
-    saa GNOME Shellin rakentamaan taustan uudelleen luotettavammin.
+    The fix is to force picture-options to switch to another value and back
+    on every run - this triggers a real "changed" signal and makes GNOME
+    Shell rebuild the background more reliably.
     """
     uri = f"file://{path}"
     bg = "org.gnome.desktop.background"
 
-    # Pakotetaan aito muutossignaali vaihtamalla options ensin toiseen
-    # arvoon - jos edellinen ajo jätti sen jo "none"-tilaan, tämä ei
-    # haittaa, seuraava rivi asettaa lopullisen arvon joka tapauksessa.
+    # Force a real change signal by first switching options to another
+    # value - if the previous run already left it at "none", that does no
+    # harm, the following lines set the final value in any case.
     subprocess.run(["gsettings", "set", bg, "picture-options", "none"], check=False)
     subprocess.run(["gsettings", "set", bg, "picture-uri", uri], check=True)
     subprocess.run(["gsettings", "set", bg, "picture-uri-dark", uri], check=False)
@@ -196,29 +196,29 @@ def set_gnome_wallpaper(path: Path):
 
 
 def set_windows_wallpaper(path: Path):
-    """Asettaa Windows-taustakuvan SystemParametersInfoW-Win32-kutsulla.
+    """Sets the Windows wallpaper with the SystemParametersInfoW Win32 call.
 
-    Tämä on Windowsin virallinen tapa vaihtaa taustakuva (sama mekanismi
-    jota mm. Asetukset-sovellus käyttää) - ei erillistä daemonia tai
-    komentoriviohjelmaa tarvita, toisin kuin GNOME:n gsettings-mallissa.
+    This is Windows' official way of changing the wallpaper (the same
+    mechanism the Settings app uses) - no separate daemon or command-line
+    program is needed, unlike in GNOME's gsettings model.
 
-    SPI_SETDESKWALLPAPER (20) yhdistettynä SPIF_UPDATEINIFILE:iin (1)
-    kirjoittaa polun myös käyttäjäprofiiliin, jotta valinta säilyy
-    uudelleenkäynnistyksen yli, ja SPIF_SENDCHANGE:lla (2) lähetetään
-    WM_SETTINGCHANGE-viesti, joka saa työpöydän piirtymään heti uusiksi
-    (ilman tätä muutos näkyisi vasta seuraavassa kirjautumisessa).
+    SPI_SETDESKWALLPAPER (20) combined with SPIF_UPDATEINIFILE (1) also
+    writes the path to the user profile so that the choice survives a
+    restart, and SPIF_SENDCHANGE (2) sends a WM_SETTINGCHANGE message that
+    makes the desktop redraw immediately (without it the change would only
+    show at the next login).
 
-    Windows tukee natiivisti JPEG/PNG/BMP-taustakuvia, joten HEIC/HEIF
-    on tässäkin muunnettava ensin (ks. get_display_path) - Windowsilla
-    ei ole minkäänlaista HEIC-tukea taustakuvan asetuksessa.
+    Windows natively supports JPEG/PNG/BMP wallpapers, so HEIC/HEIF must be
+    converted first here too (see get_display_path) - Windows has no HEIC
+    support whatsoever in the wallpaper setting.
 
-    Rekisteriin asetetaan lisäksi "Fill"-venytystapa (WallpaperStyle=10),
-    joka vastaa GNOME-puolen "zoom"-asetusta.
+    The registry is also set to the "Fill" stretch mode (WallpaperStyle=10),
+    which corresponds to GNOME's "zoom" setting.
     """
     if sys.platform != "win32":
-        raise RuntimeError("set_windows_wallpaper() vaatii Windowsin")
+        raise RuntimeError("set_windows_wallpaper() requires Windows")
 
-    import winreg  # saatavilla vain Windowsilla, siksi tuonti tässä eikä tiedoston alussa
+    import winreg  # only available on Windows, hence imported here and not at the top of the file
 
     try:
         key = winreg.OpenKey(
@@ -228,8 +228,8 @@ def set_windows_wallpaper(path: Path):
         winreg.SetValueEx(key, "TileWallpaper", 0, winreg.REG_SZ, "0")
         winreg.CloseKey(key)
     except OSError:
-        # Ei kriittinen - taustakuva vaihtuu silti, venytystapa vain saattaa
-        # jäädä ennalleen jos rekisteriavainta ei jostain syystä saada auki.
+        # Not critical - the wallpaper changes anyway, only the stretch mode
+        # may stay as it was if the registry key cannot be opened for some reason.
         pass
 
     SPI_SETDESKWALLPAPER = 20
@@ -247,12 +247,12 @@ def set_windows_wallpaper(path: Path):
     )
     if not ok:
         raise RuntimeError(
-            f"SystemParametersInfoW epäonnistui (GetLastError={ctypes.GetLastError()})"
+            f"SystemParametersInfoW failed (GetLastError={ctypes.GetLastError()})"
         )
 
 
 def set_wallpaper(path: Path):
-    """Asettaa taustakuvan käyttöjärjestelmälle sopivalla tavalla."""
+    """Sets the wallpaper in the way that suits the operating system."""
     if sys.platform == "win32":
         set_windows_wallpaper(path)
     else:
@@ -283,12 +283,12 @@ def main():
     current_elev = elevation(obs, now)
     current_az = azimuth(obs, now)
 
-    # Auringon korkeuskulma ei ole lineaarinen valon voimakkuuden suhteen:
-    # ero 40° ja 45° välillä (keskipäivä) näkyy tuskin ollenkaan, mutta ero
-    # -2° ja +4° välillä (horisontin tuntumassa, auringonnousu/-lasku) voi
-    # muuttaa valaistuksen hämärästä kirkkaaksi. Siksi käytetään tiukempaa
-    # toleranssia kun ollaan lähellä horisonttia ("twilight_band" astetta
-    # nollasta), jotta yöllä ei valikoidu selvästi kirkkaampia päiväkuvia.
+    # The sun elevation is not linear with respect to light intensity: the
+    # difference between 40° and 45° (midday) is hardly visible, but the
+    # difference between -2° and +4° (near the horizon, sunrise/sunset) can
+    # change the lighting from dusky to bright. Therefore a stricter
+    # tolerance is used near the horizon (within "twilight_band" degrees of
+    # zero), so that clearly brighter daytime photos are not chosen at night.
     if abs(current_elev) <= twilight_band:
         effective_tolerance = twilight_tolerance
         tolerance_reason = tr("wp.reason_twilight", elev=current_elev, band=twilight_band)
@@ -296,15 +296,16 @@ def main():
         effective_tolerance = tolerance
         tolerance_reason = tr("wp.reason_normal")
 
-    # Vain kuvat jotka löytyvät levyltä
+    # Only photos that exist on disk
     records = [r for r in records if Path(r["path"]).exists()]
     if not records:
         log(tr("wp.no_photos"))
         return
 
-    # Vain kuvat joilla on sijainti ja oikea ottoaika (EXIF tai käsin annettu):
-    # muuten kuvan aurinkokulma on arvaus (kotisijainti / tiedoston muokkausaika).
-    # Jos yhdelläkään kuvalla ei ole, käytetään kaikkia jotta valinta ei jää tyhjäksi.
+    # Only photos that have a location and a real capture time (EXIF or entered
+    # by hand): otherwise the photo's sun angle is a guess (home location /
+    # file modification time). If no photo has them, all photos are used so
+    # that the choice does not end up empty.
     complete = [r for r in records if r.get("gps") and r.get("time_source") != "mtime_fallback"]
     records = complete or records
 
@@ -322,39 +323,36 @@ def main():
         candidates = within_tolerance
         mode = tr("wp.mode_tol", reason=tolerance_reason, tol=effective_tolerance)
     else:
-        # Varajärjestelmä: otetaan N lähintä koko indeksistä. Yöllä/hämärässä
-        # tämä voi silti tarkoittaa kirkkaampaa kuvaa jos kokoelmassa ei ole
-        # yhtään hämäriä/pimeitä kuvia - lokitetaan selvästi jotta ongelma
-        # (liian vähän yökuvia kokoelmassa) on helppo huomata.
+        # Fallback: take the N nearest from the whole index. At night/dusk
+        # this can still mean a brighter photo if the collection has no
+        # dusky/dark photos - it is logged clearly so that the problem
+        # (too few night photos in the collection) is easy to notice.
         scored.sort(key=lambda t: t[1])
         candidates = scored[:FALLBACK_CANDIDATE_COUNT]
         mode = tr("wp.mode_fallback", reason=tolerance_reason, tol=effective_tolerance)
 
 
-    # Estetään sama kuva kahdesti peräkkäin - suodatetaan edellinen valinta
-    # pois, mutta vain jos jäljelle jää vielä vaihtoehtoja.
-    # Kierrätys: jokainen ehdokas näytetään kerran ennen kuin mikään toistuu.
-    # Kun kaikki nykyiset ehdokkaat on käyty läpi, aloitetaan uusi kierros, joten
-    # vaihto jatkuu loputtomiin eikä lopu "vaihtoehdot loppuivat" -tilaan.
-    # Edellinen kuva ei koskaan tule kahdesti peräkkäin.
+    # Cycling: every candidate is shown once before any repeats. When all
+    # current candidates have been gone through, a new round starts, so
+    # changing continues endlessly and never ends up in an "options ran out"
+    # state. The previous photo never comes twice in a row.
     last_choice = read_last_choice()
     history = read_history()
     unseen = [t for t in candidates if t[0]["path"] not in history and t[0]["path"] != last_choice]
     if not unseen:
-        history = []  # kierros käyty läpi -> uusi kierros
+        history = []  # round completed -> new round
         unseen = [t for t in candidates if t[0]["path"] != last_choice]
     if not unseen:
-        # Ainoa ehdokas on jo taustakuvana: laajennetaan lähimpiin muihin kuviin,
-        # jotta vaihto onnistuu (muuten "Vaihda nyt" ei tekisi mitään).
+        # The only candidate is already the wallpaper: widen to the nearest other
+        # photos so that changing succeeds (otherwise "Change now" would do nothing).
         unseen = sorted((t for t in scored if t[0]["path"] != last_choice), key=lambda t: t[1])[:FALLBACK_CANDIDATE_COUNT]
         mode += tr("wp.mode_widened")
     candidates = unseen or candidates
 
-    # Painotettu satunnaisvalinta: mitä lähempänä, sitä todennäköisempi.
-    # Neliöllinen painotus (ei lineaarinen) suosii voimakkaasti lähimpiä
-    # osumia - näin kaukaisempi ehdokas (esim. 5-6° päässä, sallittu jos
-    # se mahtuu toleranssiin) valikoituu vain harvoin, vaikka teknisesti
-    # kelpaisikin.
+    # Weighted random choice: the closer, the more likely. The quadratic
+    # weighting (not linear) strongly favours the nearest matches - this way
+    # a more distant candidate (e.g. 5-6° away, allowed if it fits within the
+    # tolerance) is chosen only rarely, even though it would technically do.
     weights = [1.0 / ((t[1] + 0.3) ** 2) for t in candidates]
     chosen_record, chosen_score, chosen_elev_diff = random.choices(candidates, weights=weights, k=1)[0]
     chosen_path = Path(chosen_record["path"])

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Kulma - Windowsin ilmoitusalueen (tray) sovellus.
+Kulma - Windows notification area (tray) app.
 
-Korvaa Task Scheduler -tehtävän "Kulma": sovellus pyörii taustalla,
-vaihtaa taustakuvan config.jsonin `interval_minutes`-välein (oletus 30 min)
-ja tarjoaa kuvakkeen valikon:
+Replaces the "Kulma" Task Scheduler task: the app runs in the background,
+changes the wallpaper every `interval_minutes` (default 30 min, from
+config.json) and offers an icon menu:
 
-  - vasen klikkaus / "Vaihda taustakuva nyt"
-  - Tauko / jatka automaattista vaihtoa
-  - Päivitä indeksi (kysyy puuttuvat GPS-sijainnit ja ottoajat)
-  - Asetukset (tkinter-ikkuna)
-  - Avaa loki
-  - Käynnistä Windowsin mukana
-  - Tietoja (versio, kirjastot, linkki GitHubiin)
-  - Lopeta
+  - left click / "Change wallpaper now"
+  - Pause / resume the automatic change
+  - Update index (asks for missing GPS locations and capture times)
+  - Settings (tkinter window, includes the language)
+  - Open log
+  - Start with Windows
+  - About (version, libraries, photo library statistics, GitHub link)
+  - Quit
 
-Käynnistys: pythonw kulma_tray.py   (asetusikkuna: kulma_tray.py --settings)
-Riippuvuus: pip install pystray
+Start: pythonw kulma_tray.py   (settings window: kulma_tray.py --settings)
+Dependency: pip install pystray
 """
 
 import ctypes
@@ -35,9 +35,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import kulma_index as idx  # noqa: E402  (overrides.json ja HEIC-tuki)
-import kulma_wallpaper as wp  # noqa: E402  (jakaa polut, lokin ja valintalogiikan)
-import kulma_i18n as i18n  # noqa: E402  (käyttöliittymän kieli)
+import kulma_index as idx  # noqa: E402  (overrides.json and HEIC support)
+import kulma_wallpaper as wp  # noqa: E402  (shares the paths, the log and the selection logic)
+import kulma_i18n as i18n  # noqa: E402  (UI language)
 from kulma_i18n import t as tr  # noqa: E402
 
 __version__ = "1.0.0"
@@ -46,13 +46,14 @@ DEFAULT_INTERVAL_MIN = 30
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 CREATE_NO_WINDOW = 0x08000000
 INDEX_SCRIPT = Path(__file__).resolve().with_name("kulma_index.py")
-PLACES_PATH = wp.CONFIG_PATH.with_name("places.json")  # paikannimien välimuisti
-# Kuvake (📐☀️), jonka windows/make_icon.py luo asennuksessa; jos puuttuu, piirretään oletuskuvake.
+PLACES_PATH = wp.CONFIG_PATH.with_name("places.json")  # place name cache
+# The icon (set square + sun) is created at install time by windows/make_icon.py;
+# if it is missing, a fallback icon is drawn.
 ICON_PNG = Path(os.environ.get("LOCALAPPDATA", "")) / "Kulma" / "icon" / "kulma.png"
 
-# Asetusikkunan oletusarvot ensikäynnistykseen (config.example.json:n kaltaiset).
+# Default values of the settings window for the first start (similar to config.example.json).
 DEFAULTS = {
-    "photo_dir": str(Path.home() / "Pictures" / "Taustakuvat").replace("\\", "/"),
+    "photo_dir": str(Path.home() / "Pictures" / "Wallpapers").replace("\\", "/"),
     "latitude": 60.1699,
     "longitude": 24.9384,
     "timezone": "Europe/Helsinki",
@@ -69,19 +70,19 @@ def load_config() -> dict:
 
 
 def set_window_icon(root):
-    """Kulman kuvake tkinter-ikkunaan ja tehtäväpalkkiin (jos kuvake on luotu)."""
+    """Puts the Kulma icon on a tkinter window and the taskbar (if the icon has been created)."""
     try:
         from PIL import Image, ImageTk
-        root._kulma_icon = ImageTk.PhotoImage(Image.open(ICON_PNG))  # viite pidettävä
+        root._kulma_icon = ImageTk.PhotoImage(Image.open(ICON_PNG))  # keep a reference
         root.iconphoto(True, root._kulma_icon)
     except Exception:
         pass
 
 
-# --- Asetusikkuna (ajetaan omana prosessinaan: tkinter ei tykkää säikeistä) ---
+# --- Settings window (run as its own process: tkinter does not like threads) ---
 
 def system_language() -> str:
-    """Ensikäynnistyksen oletuskieli: suomi jos Windowsin käyttöliittymä on suomea, muuten englanti."""
+    """Default language for the first start: Finnish if the Windows UI is Finnish, otherwise English."""
     try:
         return "fi" if ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x0B else "en"
     except Exception:
@@ -93,7 +94,7 @@ def settings_window():
     from tkinter import filedialog, messagebox, ttk
 
     cfg = {**DEFAULTS, **load_config()}
-    # Vanhoissa asetuksissa kieltä ei ole tallennettu: silloin sovellus on ollut suomeksi.
+    # Old settings have no stored language: the app has then been in Finnish.
     cfg_lang = load_config().get("language") or ("fi" if wp.CONFIG_PATH.exists() else system_language())
     root = tk.Tk()
     set_window_icon(root)
@@ -147,8 +148,8 @@ def settings_window():
         wp.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(wp.CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump({**old, **new}, f, indent=2, ensure_ascii=False)
-        i18n.reload()  # viestit heti uudella kielellä
-        # Uusi kuvakansio (tai puuttuva indeksi) -> indeksoidaan taustalla.
+        i18n.reload()  # messages immediately in the new language
+        # New photo folder (or missing index) -> index in the background.
         if old.get("photo_dir") != new["photo_dir"] or not wp.INDEX_PATH.exists():
             reindex()
             messagebox.showinfo("Kulma", tr("set.saved_reindex"))
@@ -164,13 +165,13 @@ def settings_window():
 
 
 def photo_library_stats() -> dict | None:
-    """Kuvakirjaston tilastot indeksistä: määrät, puuttuvat tiedot ja 3 yleisintä sijaintia."""
+    """Photo library statistics from the index: counts, missing data and the 3 most common locations."""
     try:
         with open(wp.INDEX_PATH, "r", encoding="utf-8") as f:
             records = json.load(f)
     except Exception:
         return None
-    clusters = []  # [lat, lon, kuvia] - alle 30 km päässä toisistaan olevat samaan ryhmään
+    clusters = []  # [lat, lon, photos] - photos less than 30 km apart go into the same group
     for r in records:
         if "lat" not in r:
             continue
@@ -190,7 +191,7 @@ def photo_library_stats() -> dict | None:
 
 
 def about_window():
-    """Tietoja-ikkuna: kuvake, versio, kirjastot, kuvakirjaston tilastot ja linkki GitHubiin."""
+    """About window: icon, version, libraries, photo library statistics and the GitHub link."""
     import platform
     import tkinter as tk
     import webbrowser
@@ -206,7 +207,7 @@ def about_window():
     row = iter(range(100))
     bold = ("Segoe UI", 10, "bold")
 
-    try:  # kuvake ylimpänä
+    try:  # icon at the top
         from PIL import Image, ImageTk
         root._logo = ImageTk.PhotoImage(Image.open(ICON_PNG).resize((96, 96), Image.LANCZOS))
         ttk.Label(frm, image=root._logo).grid(row=next(row), column=0, pady=(0, 6))
@@ -267,7 +268,7 @@ def about_window():
                 name = place_name(lat, lon) or f"{lat:.2f}°, {lon:.2f}°"
                 lab.configure(text=tr("about.place_n", name=name, n=n, pct=pct(n)))
 
-        def lookup():  # paikannimet taustalla, korkeintaan 1 pyyntö/s (Nominatimin käyttöehdot)
+        def lookup():  # place names in the background, at most 1 request/s (Nominatim usage policy)
             for lat, lon, _ in st["top"]:
                 if place_name(lat, lon) is None:
                     place_name(lat, lon, fetch=True)
@@ -296,7 +297,7 @@ def about_window():
 
 
 def run_index() -> subprocess.CompletedProcess:
-    """Ajaa kulma_index.py:n ja odottaa (ei konsoli-ikkunaa)."""
+    """Runs kulma_index.py and waits for it (no console window)."""
     return subprocess.run([sys.executable, str(INDEX_SCRIPT)], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
                           creationflags=CREATE_NO_WINDOW)
@@ -313,7 +314,7 @@ def reindex_and_review():
 
 
 def geocode(text: str) -> tuple[float, float, str]:
-    """Sijainti tekstistä: "60.17, 24.94" tai paikannimi (Nominatim-haku)."""
+    """Location from text: "60.17, 24.94" or a place name (Nominatim search)."""
     m = re.fullmatch(r"\s*(-?\d+(?:[.,]\d+)?)\s*[,; ]\s*(-?\d+(?:[.,]\d+)?)\s*", text)
     if m:
         lat, lon = (float(g.replace(",", ".")) for g in m.groups())
@@ -331,17 +332,17 @@ def geocode(text: str) -> tuple[float, float, str]:
 
 
 def missing_records(records: list) -> list:
-    """Kuvat joilta puuttuu sijainti (GPS) tai EXIF-ottoaika.
+    """Photos that lack a location (GPS) or an EXIF capture time.
 
-    Jokaisella kuvalla pitää olla molemmat, jotta aurinkokulma lasketaan
-    oikeaan paikkaan ja aikaan ja tiedot voidaan näyttää."""
+    Every photo must have both, so that the sun angle is calculated for the
+    right place and time and the details can be shown."""
     return [r for r in records if not r.get("gps") or r.get("time_source") == "mtime_fallback"]
 
 
 def review_window():
-    """Näyttää kuvat joilta puuttuu GPS-sijainti tai EXIF-ottoaika ja kysyy ne
-    käyttäjältä. Vastaukset tallennetaan overrides.json:iin (kuvatiedostoja ei
-    muokata) ja indeksi ajetaan uudelleen."""
+    """Shows the photos that lack a GPS location or an EXIF capture time and asks
+    the user for them. The answers are saved to overrides.json (the photo files
+    are not modified) and the index is run again."""
     import tkinter as tk
     from tkinter import messagebox, ttk
     from PIL import Image, ImageOps, ImageTk
@@ -360,7 +361,7 @@ def review_window():
     root.title(tr("rev.title"))
 
     def remaining() -> int:
-        """Montako kuvaa on yhä ilman sijaintia tai ottoaikaa."""
+        """How many photos are still without a location or a capture time."""
         def complete(r):
             ov = overrides.get(r["path"], {})
             return (r.get("gps") or "lat" in ov) and (r.get("time_source") != "mtime_fallback" or "capture_time" in ov)
@@ -416,7 +417,7 @@ def review_window():
                 im.thumbnail((380, 380))
                 photo = ImageTk.PhotoImage(im)
             preview.configure(image=photo, text="")
-            preview.image = photo  # viite pidettävä, muuten kuva katoaa
+            preview.image = photo  # keep a reference, otherwise the image disappears
         except Exception:
             preview.configure(image="", text=tr("rev.nopreview"))
 
@@ -472,10 +473,10 @@ def review_window():
     root.mainloop()
 
 
-# --- Toiminnot ---------------------------------------------------------------
+# --- Actions -----------------------------------------------------------------
 
 def reindex():
-    """Indeksoi taustalla ja avaa sen jälkeen puuttuvien tietojen ikkunan (jos tarvitaan)."""
+    """Indexes in the background and then opens the missing-details window (if needed)."""
     subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--reindex-review"],
                      creationflags=CREATE_NO_WINDOW)
 
@@ -504,15 +505,16 @@ def set_autostart(on: bool):
 
 
 def place_name(lat: float, lon: float, fetch: bool = False) -> str | None:
-    """Paikannimi (esim. "Helsinki, Suomi") OpenStreetMapin Nominatim-palvelusta.
+    """Place name (e.g. "Helsinki, Finland") from OpenStreetMap's Nominatim service.
 
-    Koordinaatit pyöristetään kahteen desimaaliin (~1 km) sekä välimuistiavaimessa
-    että pyynnössä, joten palveluun ei lähde tarkkaa sijaintia. Tulokset
-    tallennetaan places.json:iin, eli sama paikka haetaan vain kerran.
-    Verkkohaku tehdään vain kun fetch=True (valikkoa rakennettaessa ei haeta).
+    The coordinates are rounded to two decimals (~1 km) both in the cache key
+    and in the request, so no exact location is sent to the service. Results
+    are saved to places.json, so the same place is looked up only once.
+    The network lookup is done only when fetch=True (nothing is fetched while
+    building the menu).
     """
     lat, lon = round(lat, 2), round(lon, 2)
-    key = f"{lat},{lon}" + ("" if i18n.language() == "fi" else f"|{i18n.language()}")  # välimuisti kielikohtainen
+    key = f"{lat},{lon}" + ("" if i18n.language() == "fi" else f"|{i18n.language()}")  # cache is per language
     try:
         with open(PLACES_PATH, "r", encoding="utf-8") as f:
             cache = json.load(f)
@@ -527,7 +529,7 @@ def place_name(lat: float, lon: float, fetch: bool = False) -> str | None:
         with urllib.request.urlopen(req, timeout=5) as r:
             a = json.load(r).get("address", {})
     except Exception:
-        return None  # ei nettiä tms. - yritetään uudelleen seuraavalla vaihdolla
+        return None  # no network etc. - try again at the next change
     name = ", ".join(x for x in (
         a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or a.get("county"),
         a.get("country")) if x)
@@ -542,7 +544,7 @@ def place_name(lat: float, lon: float, fetch: bool = False) -> str | None:
 
 
 def photo_record() -> dict | None:
-    """Nykyisen (viimeksi valitun) kuvan indeksitietue, tai None."""
+    """Index record of the current (last chosen) photo, or None."""
     last = wp.read_last_choice()
     if not last:
         return None
@@ -554,7 +556,7 @@ def photo_record() -> dict | None:
 
 
 def photo_location(fetch: bool = False) -> str | None:
-    """Nykyisen kuvan ottopaikka tekstinä, tai None jos kuvaa ei ole valittu."""
+    """Capture location of the current photo as text, or None if no photo has been chosen."""
     rec = photo_record()
     if not rec:
         return None
@@ -564,7 +566,7 @@ def photo_location(fetch: bool = False) -> str | None:
 
 
 def photo_time() -> str | None:
-    """Nykyisen kuvan ottoaika tekstinä (esim. "16.06.2019 klo 03:57"), tai None."""
+    """Capture time of the current photo as text (e.g. "16 Jun 2019, 03:57"), or None."""
     rec = photo_record()
     if not rec:
         return None
@@ -573,7 +575,7 @@ def photo_time() -> str | None:
 
 
 def status_text() -> str:
-    """Esim. "Aurinko 28.6° · IMG_7377.HEIC"."""
+    """E.g. "Sun 28.6° · IMG_7377.HEIC"."""
     try:
         cfg = load_config()
         from astral import Observer
@@ -587,7 +589,7 @@ def status_text() -> str:
 
 
 def main():
-    try:  # tehtäväpalkki ryhmittelee ikkunat Kulmaksi eikä pythonw:ksi
+    try:  # the taskbar groups the windows as Kulma instead of pythonw
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Kulma.Tray")
     except Exception:
         pass
@@ -598,7 +600,7 @@ def main():
     if "--reindex-review" in sys.argv:
         return reindex_and_review()
 
-    # Vain yksi tray-instanssi kerrallaan.
+    # Only one tray instance at a time.
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateMutexW(None, False, "Kulma-Tray")
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
@@ -608,12 +610,12 @@ def main():
     from PIL import Image, ImageDraw
 
     def drawn_icon(active: bool) -> Image.Image:
-        """Oletuskuvake (piirretty aurinko) jos kuvaketta ei ole luotu."""
+        """Fallback icon (a drawn sun) if the icon has not been created."""
         img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         color = (255, 196, 40, 255) if active else (150, 150, 150, 255)
         d.ellipse((18, 18, 46, 46), fill=color)
-        for a in range(8):  # säteet
+        for a in range(8):  # rays
             dx, dy = math.cos(a * math.pi / 4), math.sin(a * math.pi / 4)
             d.line((32 + 20 * dx, 32 + 20 * dy, 32 + 29 * dx, 32 + 29 * dy), fill=color, width=4)
         return img
@@ -623,7 +625,7 @@ def main():
             img = Image.open(ICON_PNG).convert("RGBA")
         except Exception:
             return drawn_icon(active)
-        if not active:  # tauolla: harmaa
+        if not active:  # paused: grey
             grey = img.convert("L").convert("RGBA")
             grey.putalpha(img.getchannel("A"))
             return grey
@@ -631,7 +633,7 @@ def main():
 
     lock = threading.Lock()
     state = {"paused": False}
-    wake = threading.Event()  # herättää ajastimen kesken odotuksen
+    wake = threading.Event()  # wakes the timer in the middle of its wait
 
     def location_line() -> str | None:
         loc = photo_location()
@@ -645,8 +647,8 @@ def main():
         return tr("time.line", when=when) if when else None
 
     def refresh():
-        i18n.reload()  # kieli voi olla vaihtunut asetuksissa
-        photo_location(fetch=True)  # hakee ja välimuistittaa paikannimen (verkko)
+        i18n.reload()  # the language may have changed in the settings
+        photo_location(fetch=True)  # fetches and caches the place name (network)
         icon.icon = make_icon(not state["paused"])
         icon.title = "\n".join(filter(None, (status_text(), location_line(), time_line())))
         icon.update_menu()
@@ -656,7 +658,7 @@ def main():
             try:
                 wp.main()
             except SystemExit:
-                pass  # virhe on jo lokitettu wp.main():ssa
+                pass  # the error has already been logged in wp.main()
             except Exception as e:
                 wp.log(tr("err.tray", e=e))
         refresh()
@@ -674,7 +676,7 @@ def main():
 
     def open_settings(*_):
         p = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--settings"])
-        # Kun asetusikkuna sulkeutuu, päivitetään valikko ja vihjeteksti (esim. vaihdettu kieli).
+        # When the settings window closes, refresh the menu and tooltip (e.g. a changed language).
         threading.Thread(target=lambda: (p.wait(), refresh()), daemon=True).start()
 
     def quit_app(*_):
@@ -715,7 +717,7 @@ def main():
     def setup(icon):
         icon.visible = True
         if not wp.CONFIG_PATH.exists():
-            open_settings()  # ensikäynnistys: kysytään asetukset
+            open_settings()  # first start: ask for the settings
         threading.Thread(target=timer, daemon=True).start()
 
     icon.run(setup)

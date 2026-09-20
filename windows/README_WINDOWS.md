@@ -1,113 +1,124 @@
-# Kulma Windowsilla
+# Kulma on Windows
 
-Sama idea kuin Linux-versiossa - taustakuva vaihtuu auringon korkeuskulman
-mukaan, ei kellonajan. Kaksi eroa Linux-versioon:
+The same idea as in the Linux version - the wallpaper changes according to the
+sun elevation, not the time of day. Two differences to the Linux version:
 
-- Taustakuva asetetaan Windowsin `SystemParametersInfoW`-rajapinnalla
-  (`gsettings`-vastine), ei erillistä ohjelmaa tarvita.
-- systemd-timerien sijaan taustakuvan vaihtaa **tray-sovellus** (aurinkokuvake
-  ilmoitusalueella) ja indeksin päivityksen hoitaa Windowsin Task Scheduler.
+- The wallpaper is set with Windows' `SystemParametersInfoW` API (the
+  counterpart of `gsettings`), no separate program is needed.
+- Instead of systemd timers, the wallpaper is changed by a **tray app** (a sun
+  icon in the notification area), and the index update is handled by Windows'
+  Task Scheduler.
 
-`kulma_index.py` ja `kulma_wallpaper.py` ovat samat tiedostot kuin
-Linux-puolella (`bin/`-kansiossa) - ne tunnistavat käyttöjärjestelmän
-automaattisesti (`sys.platform`) ja käyttävät oikeita polkuja/API-kutsuja.
-Samaa repoa voi siis käyttää molemmilla käyttöjärjestelmillä.
+`kulma_index.py` and `kulma_wallpaper.py` are the same files as on the Linux
+side (in the `bin/` folder) - they detect the operating system automatically
+(`sys.platform`) and use the right paths/API calls. So the same repo can be
+used on both operating systems.
 
-## Riippuvuudet
+## Dependencies
 
-1. **Python 3.9+** [python.org](https://www.python.org/downloads/) -
-   asennuksessa muista rastittaa **"Add python.exe to PATH"**.
-2. Avaa PowerShell ja asenna kirjastot (asennusskripti tekee tämän myös
-   automaattisesti, mutta voit ajaa käsin):
+1. **Python 3.9+** from [python.org](https://www.python.org/downloads/) -
+   remember to tick **"Add python.exe to PATH"** during setup.
+2. Open PowerShell and install the libraries (the install script also does this
+   automatically, but you can run it by hand):
    ```powershell
-   pip install astral Pillow pillow-heif
+   pip install astral Pillow pillow-heif pystray
    ```
 
-## Asennus
+## Installation
 
 ```powershell
-cd polku\kulma\windows
+cd path\to\kulma\windows
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-(`-ExecutionPolicy Bypass` tarvitaan koska skriptejä ei ole allekirjoitettu -
-vaikuttaa vain tähän yhteen ajokertaan, ei muuta järjestelmän asetuksia.)
+(`-ExecutionPolicy Bypass` is needed because the scripts are not signed -
+it only affects this one run and does not change the system's settings.)
 
-Skripti:
-- kopioi skriptit kansioon `%LOCALAPPDATA%\Kulma\bin\`
-- asentaa Python-riippuvuudet (mm. `pystray`)
-- käynnistää tray-sovelluksen (`kulma_tray.py`) ja lisää sen Windowsin
-  käynnistykseen (`HKCU\...\Run`)
-- rekisteröi Task Scheduler -tehtävän **Kulma-Reindex** (indeksin päivitys,
-  joka yö klo 03:30)
-- poistaa vanhan **Kulma**-ajastetun tehtävän, jos sellainen on (tray korvaa
-  sen, jottei taustakuva vaihtuisi kahteen kertaan)
+The script:
+- copies the scripts to `%LOCALAPPDATA%\Kulma\bin\`
+- installs the Python dependencies (including `pystray`)
+- creates the app icon (see below)
+- starts the tray app (`kulma_tray.py`) and adds it to Windows startup
+  (`HKCU\...\Run`) and the Start Menu (a shortcut called "Kulma")
+- registers the Task Scheduler task **Kulma-Reindex** (index update, every
+  night at 03:30)
+- removes the old **Kulma** scheduled task if there is one (the tray app
+  replaces it, so that the wallpaper does not change twice)
 
-## Kuvake
+## Icon
 
-Sovelluksen kuvake yhdistää emojit 📐 ja ☀️. `install.ps1` luo sen ajamalla
-`make_icon.py`:n, joka lataa kaksi kuvaa Applen emoji-kuvakirjastosta
-(`emoji-datasource-apple@16.0.0`, jsDelivr; tiedostojen SHA-256 tarkistetaan) ja
-yhdistää ne. Kuvake tallentuu tiedostoihin `%LOCALAPPDATA%\Kulma\icon\kulma.ico` ja
-`kulma.png`, ja sitä käytetään tray-kuvakkeena, Käynnistys-valikon pikakuvakkeessa sekä
-sovelluksen ikkunoissa. Tauolla tray-kuvake on harmaa.
+The app icon combines the emojis 📐 and ☀️. `install.ps1` creates it by running
+`make_icon.py`, which downloads two images from Apple's emoji image library
+(`emoji-datasource-apple@16.0.0`, jsDelivr; the SHA-256 of the files is
+verified) and combines them. The icon is stored in the files
+`%LOCALAPPDATA%\Kulma\icon\kulma.ico` and `kulma.png`, and it is used as the
+tray icon, in the Start Menu shortcut and in the app's windows. While paused,
+the tray icon is grey.
 
-**Applen emoji-kuvat ovat Applen tekijänoikeudella suojattuja, joten niitä ei ole
-tässä repossa** - ne ladataan vain omalle koneellesi. Jos lataus epäonnistuu (ei
-verkkoa), tray käyttää piirrettyä oletuskuvaketta; voit yrittää uudelleen komennolla
-`python windows\make_icon.py` ja käynnistää sovelluksen uudelleen.
+**Apple's emoji images are copyrighted by Apple, so they are not in this
+repo** - they are downloaded only onto your own machine. If the download fails
+(no network), the tray app uses a drawn fallback icon; you can retry with
+`python windows\make_icon.py` and restart the app.
 
-## Käyttö: tray-sovellus
+## Usage: the tray app
 
-Etsi aurinkokuvake ilmoitusalueelta (Windows 11:ssä se voi olla piilotettujen
-kuvakkeiden `^`-listassa; voit raahata sen näkyviin). Kuvakkeen päällä oleva
-vihjeteksti ja valikon kolme ylintä riviä näyttävät auringon korkeuskulman, nykyisen kuvan sekä sen ottopaikan ja ottoajan.
+Find the sun icon in the notification area (in Windows 11 it may be in the
+hidden-icons `^` list; you can drag it into view). The tooltip of the icon and
+the three top rows of the menu show the sun elevation, the current photo, and
+the place and time it was taken.
 
-**Ottopaikka:** paikannimi (esim. "Helsinki, Suomi") haetaan kuvan GPS-koordinaateista OpenStreetMapin Nominatim-palvelusta. Palveluun lähetetään vain ~1 km tarkkuuteen pyöristetty sijainti, ja tulos tallennetaan välimuistiin (`%APPDATA%\Kulma\places.json`), joten sama paikka haetaan vain kerran. Jos verkkoa ei ole, näytetään koordinaatit; jos kuvassa ei ole GPS-dataa, näytetään "ei GPS-tietoa".
+**Capture location:** the place name (e.g. "Helsinki, Finland") is looked up
+from the GPS coordinates of the photo using OpenStreetMap's Nominatim service.
+Only a location rounded to ~1 km accuracy is sent to the service, and the
+result is stored in a cache (`%APPDATA%\Kulma\places.json`), so the same place
+is looked up only once. Place names are fetched in the selected UI language. If
+there is no network, the coordinates are shown; if the photo has no location,
+the menu says it is missing.
 
-| Toiminto | Mitä tekee |
+| Action | What it does |
 |---|---|
-| Vasen klikkaus / **Vaihda taustakuva nyt** | Valitsee ja asettaa taustakuvan heti. Vaihtoa voi jatkaa loputtomiin: kuvat kierrätetään (kaikki nykyiset ehdokkaat käydään läpi ennen kuin mikään toistuu) ja uusi kierros alkaa itsestään |
-| **Tauko** | Keskeyttää automaattisen vaihdon (kuvake harmaaksi), uusi klikkaus jatkaa |
-| **Päivitä indeksi** | Ajaa `kulma_index.py`:n taustalla (uudet kuvat mukaan) ja kysyy sen jälkeen puuttuvat tiedot, ks. alla |
-| **Asetukset…** | Kuvakansio, sijainti, aikavyöhyke, vaihtoväli ja **kieli** (Suomi / English). Kielenvaihto tulee voimaan heti kun asetusikkuna suljetaan |
-| **Avaa loki** | Avaa `kulma.log`in |
-| **Käynnistä Windowsin mukana** | Kytkee automaattikäynnistyksen päälle/pois |
-| **Tietoja…** | Ikkuna, jossa kuvake, versionumero, käytettyjen kirjastojen versiot, kuvakirjaston tilastot (kuvien määrä, sijainti tiedossa / puuttuu, ottoaika puuttuu, puutteellisten määrä ja 3 yleisintä sijaintia) sekä linkki GitHubiin. Versio on `__version__` tiedostossa `kulma_tray.py`. Yleisimpien sijaintien nimet haetaan tarvittaessa Nominatimista (max 3 hakua, välimuistissa) |
-| **Lopeta** | Sulkee sovelluksen. Käynnistä uudelleen Käynnistys-valikosta (hae "Kulma"); pikakuvake luodaan asennuksessa |
+| Left click / **Change wallpaper now** | Chooses and sets a wallpaper right away. Changing can be continued endlessly: photos are cycled (all current candidates are gone through before any repeats) and a new round starts by itself |
+| **Pause** | Pauses the automatic change (the icon turns grey), another click resumes |
+| **Update index** | Runs `kulma_index.py` in the background (new photos included) and afterwards asks for the missing details, see below |
+| **Settings…** | Photo folder, location, time zone, change interval and **language** (Suomi / English). A language change takes effect as soon as the settings window is closed |
+| **Open log** | Opens `kulma.log` |
+| **Start with Windows** | Turns automatic startup on/off |
+| **About…** | A window with the icon, the version number, the versions of the libraries used, photo library statistics (number of photos, location known / missing, capture time missing, number of incomplete photos and the 3 most common locations) and a link to GitHub. The version is `__version__` in `kulma_tray.py`. The names of the most common locations are looked up from Nominatim when needed (max 3 lookups, cached) |
+| **Quit** | Closes the app. Restart it from the Start Menu (search for "Kulma"); the shortcut is created at install time |
 
-Ensimmäisellä käynnistyksellä (kun `config.json` puuttuu) asetusikkuna
-avautuu itsestään. Tallennus indeksoi kuvat taustalla, kun kuvakansio on
-uusi. Sovellus lukee asetukset joka vaihdolla, joten muutokset tulevat
-voimaan ilman uudelleenkäynnistystä (vaihtovälin muutos seuraavan vaihdon
-jälkeen).
+On the first start (when `config.json` is missing) the settings window opens by
+itself. Saving indexes the photos in the background when the photo folder is
+new. The app reads the settings at every change, so changes take effect without
+a restart (a change of the interval after the next change).
 
-### Puuttuvat sijainti- ja aikatiedot
+### Missing location and time details
 
-Kun indeksi päivitetään tray-valikosta (tai ensimmäisen kerran asetusten
-tallennuksen jälkeen) ja joltakin kuvalta puuttuu GPS-sijainti tai
-EXIF-ottoaika, avautuu ikkuna, jossa kuvat on listattu esikatselun kanssa.
-Valitse kuvia (Ctrl/Shift), kirjoita **sijainti** (paikannimi, esim. `Turku`,
-tai koordinaatit `60.45, 22.27`) ja/tai **ottoaika** (`2019-06-16 03:57` tai
-`16.06.2019 03:57`) ja paina *Käytä valituille*. *Valmis* ajaa indeksoinnin
-uudelleen uusilla tiedoilla, jolloin aurinkokulma lasketaan oikeaan paikkaan
-ja aikaan.
+When the index is updated from the tray menu (or for the first time after
+saving the settings) and a photo lacks a GPS location or an EXIF capture time,
+a window opens that lists the photos with a preview. Select photos
+(Ctrl/Shift), type a **location** (a place name, e.g. `Turku`, or coordinates
+`60.45, 22.27`) and/or a **capture time** (`2019-06-16 03:57` or
+`16.06.2019 03:57`) and press *Apply to selected*. *Done* runs the indexing
+again with the new details, so that the sun angle is calculated for the right
+place and time.
 
-**Jokaisella kuvalla pitää olla sijainti ja ottoaika.** Kuvat, joilta ne puuttuvat,
-jätetään automaattisesti pois taustakuvavalinnasta kunnes tiedot on annettu. Jos
-ikkunan sulkee kun tietoja vielä puuttuu, sovellus varoittaa. Ikkuna avautuu vain
-ensimmäisessä indeksoinnissa ja aina kun indeksin päivitys ajetaan käsin valikosta;
-sovelluksen käynnistys tai yöllinen indeksointi ei kysy mitään. Nykyisen kuvan ottopaikka ja ottoaika näkyvät tray-valikossa
-ja kuvakkeen vihjetekstissä.
+**Every photo must have a location and a capture time.** Photos that lack them
+are automatically left out of the wallpaper selection until the details have
+been entered. If you close the window while details are still missing, the app
+warns you. The window opens only at the first indexing and whenever the index
+update is run by hand from the menu; starting the app or the nightly indexing
+does not ask anything. The capture location and time of the current photo are
+shown in the tray menu and in the tooltip of the icon.
 
-Tiedot tallennetaan tiedostoon `%APPDATA%\Kulma\overrides.json` - **kuvatiedostoja
-ei muokata**. Paikannimen haku käyttää OpenStreetMapin Nominatim-palvelua
-(lähetetään vain kirjoittamasi hakuteksti). Yöllinen ajastettu indeksointi
-käyttää samoja tietoja mutta ei avaa ikkunaa.
+The details are saved to the file `%APPDATA%\Kulma\overrides.json` - **the photo
+files are not modified**. The place name search uses OpenStreetMap's Nominatim
+service (only the search text you typed is sent). The nightly scheduled
+indexing uses the same details but does not open a window.
 
-### Lisäasetukset (config.json)
+### Advanced settings (config.json)
 
-Asetusikkuna kattaa perusasiat. Tarkemmat säädöt tehdään suoraan tiedostoon:
+The settings window covers the basics. Finer adjustments are made directly in
+the file:
 
 ```powershell
 notepad "$env:APPDATA\Kulma\config.json"
@@ -115,12 +126,12 @@ notepad "$env:APPDATA\Kulma\config.json"
 
 ```json
 {
-  "photo_dir": "C:/Users/sinä/Pictures/Taustakuvat",
+  "photo_dir": "C:/Users/you/Pictures/Wallpapers",
   "latitude": 60.1699,
   "longitude": 24.9384,
   "timezone": "Europe/Helsinki",
   "interval_minutes": 30,
-  "language": "fi",
+  "language": "en",
   "elevation_tolerance": 6.0,
   "twilight_elevation_tolerance": 3.0,
   "twilight_band": 12.0,
@@ -128,58 +139,62 @@ notepad "$env:APPDATA\Kulma\config.json"
 }
 ```
 
-Kenttien selitykset ovat samat kuin pääprojektin READMEssä.
-`interval_minutes` on tray-sovelluksen vaihtoväli (oletus 30). `language` on käyttöliittymän kieli, `"fi"` (oletus) tai `"en"`; asetusikkunan kielivalinta tallentaa sen. Kaikki sovelluksen tekstit (tray-valikko, ikkunat, loki ja indeksointituloste) löytyvät tiedostosta `bin/kulma_i18n.py`. `photo_dir`
-voidaan kirjoittaa kauttaviivoilla (`C:/Users/...`) - Python käsittelee
-sen oikein myös Windowsilla.
+The explanations of the fields are the same as in the main project README.
+`interval_minutes` is the change interval of the tray app (default 30).
+`language` is the language of the user interface, `"fi"` (default when the key
+is missing) or `"en"`; the language choice in the settings window saves it. All
+the texts of the app (tray menu, windows, log and indexing output) are in
+`bin/kulma_i18n.py`. `photo_dir` can be written with forward slashes
+(`C:/Users/...`) - Python handles it correctly on Windows too.
 
-## Komentorivillä
+## On the command line
 
-Skriptit toimivat myös ilman tray-sovellusta:
+The scripts also work without the tray app:
 
 ```powershell
-python "$env:LOCALAPPDATA\Kulma\bin\kulma_index.py"       # indeksointi
-python "$env:LOCALAPPDATA\Kulma\bin\kulma_wallpaper.py"   # vaihda taustakuva kerran
-Start-ScheduledTask -TaskName "Kulma-Reindex"                # indeksointi ajastetun tehtävän kautta
-Get-Content "$env:APPDATA\Kulma\kulma.log" -Tail 20 -Wait   # loki
+python "$env:LOCALAPPDATA\Kulma\bin\kulma_index.py"       # indexing
+python "$env:LOCALAPPDATA\Kulma\bin\kulma_wallpaper.py"   # change the wallpaper once
+Start-ScheduledTask -TaskName "Kulma-Reindex"                # indexing via the scheduled task
+Get-Content "$env:APPDATA\Kulma\kulma.log" -Tail 20 -Wait   # log
 ```
 
-**Kokonaan pois (sulkee tray-sovelluksen, poistaa automaattikäynnistyksen ja tehtävät):**
+**Removing everything (closes the tray app, removes autostart, the shortcut and the tasks):**
 ```powershell
-cd polku\kulma\windows
+cd path\to\kulma\windows
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
-## Tiedostorakenne asennuksen jälkeen
+## File layout after installation
 
 ```
 %LOCALAPPDATA%\Kulma\bin\
   kulma_index.py
   kulma_wallpaper.py
   kulma_tray.py
-  kulma_i18n.py           # käyttöliittymätekstit (fi/en)
+  kulma_i18n.py           # UI texts (fi/en)
 %LOCALAPPDATA%\Kulma\cache\converted\
-  <kuvanimi>.jpg        # HEIC/HEIF-kuvista tehdyt JPEG-muunnokset
+  <photo name>.jpg        # JPEG conversions made from HEIC/HEIF photos
 %LOCALAPPDATA%\Kulma\icon\
-  kulma.ico, kulma.png  # sovelluksen kuvake (📐☀️)
+  kulma.ico, kulma.png    # the app icon (set square + sun)
 %APPDATA%\Kulma\
-  config.json            # asetukset
-  index.json              # kuvaindeksi
-  last_choice.json        # edellinen valinta
-  overrides.json          # käsin annetut sijainnit ja ottoajat
-  places.json             # paikannimien välimuisti
-  kulma.log               # lokitiedosto
+  config.json             # settings
+  index.json              # photo index
+  last_choice.json        # previous choice and round history
+  overrides.json          # locations and capture times entered by hand
+  places.json             # place name cache
+  kulma.log               # log file
 ```
 
-## Tunnetut erot Linux-versioon
+## Known differences to the Linux version
 
-- **Toimii vain kirjautuneena** (vastaava kuin Linuxin `loginctl enable-linger`
-  puuttuu): tray-sovellus ja indeksointitehtävä pyörivät vain kun käyttäjä on
-  kirjautuneena.
-- **Venytystapa (`WallpaperStyle`)** on kovakoodattu "Fill"iin (10), koska
-  se vastaa lähinnä Linux-puolen `zoom`-asetusta. Voit vaihtaa sen käsin
-  rekisteristä (`HKCU\Control Panel\Desktop\WallpaperStyle`) jos haluat
-  jonkin muun (esim. "Fit" = 6, "Stretch" = 2, "Tile" = 0/`TileWallpaper`=1).
-- **`pythonw.exe`** käytetään ajossa jotta konsoli-ikkuna ei välähdä
-  näkyviin joka 30 min - jos sitä ei löydy PATH:sta samasta kansiosta kuin
-  `python.exe`, käytetään `python.exe`:tä (toimii, mutta ikkuna voi välähtää).
+- **Works only while logged in** (there is no counterpart to Linux's
+  `loginctl enable-linger`): the tray app and the indexing task run only when
+  the user is logged in.
+- **The stretch mode (`WallpaperStyle`)** is hard-coded to "Fill" (10), because
+  it corresponds most closely to the `zoom` setting on the Linux side. You can
+  change it by hand in the registry (`HKCU\Control Panel\Desktop\WallpaperStyle`)
+  if you want another one (e.g. "Fit" = 6, "Stretch" = 2, "Tile" =
+  0/`TileWallpaper`=1).
+- **`pythonw.exe`** is used for running so that a console window does not flash
+  up - if it is not found in the same folder as `python.exe` on PATH,
+  `python.exe` is used (works, but a window may flash).
