@@ -29,7 +29,7 @@ Kaikki tapahtuu paikallisesti — kuvat pysyvät koneellasi, ei pilvipalveluita.
 **Windows-käyttäjä?** Katso [`windows/README_WINDOWS.md`](windows/README_WINDOWS.md) —
 samat `kulma_index.py`/`kulma_wallpaper.py`-skriptit toimivat sellaisenaan,
 mutta taustakuvan asetus ja ajastus hoidetaan Windowsin omilla mekanismeilla
-(systemd-timerien sijaan Task Scheduler).
+(systemd-timerien sijaan tray-sovellus ja Task Scheduler).
 
 ## Riippuvuudet
 

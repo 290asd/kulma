@@ -5,7 +5,8 @@ mukaan, ei kellonajan. Kaksi eroa Linux-versioon:
 
 - Taustakuva asetetaan Windowsin `SystemParametersInfoW`-rajapinnalla
   (`gsettings`-vastine), ei erillistä ohjelmaa tarvita.
-- systemd-timerien sijaan käytetään Windowsin Task Scheduleria.
+- systemd-timerien sijaan taustakuvan vaihtaa **tray-sovellus** (aurinkokuvake
+  ilmoitusalueella) ja indeksin päivityksen hoitaa Windowsin Task Scheduler.
 
 `kulma_index.py` ja `kulma_wallpaper.py` ovat samat tiedostot kuin
 Linux-puolella (`bin/`-kansiossa) - ne tunnistavat käyttöjärjestelmän
@@ -34,15 +35,41 @@ vaikuttaa vain tähän yhteen ajokertaan, ei muuta järjestelmän asetuksia.)
 
 Skripti:
 - kopioi skriptit kansioon `%LOCALAPPDATA%\Kulma\bin\`
-- luo `config.json`:in kansioon `%APPDATA%\Kulma\` (jos ei jo ole)
-- asentaa Python-riippuvuudet
-- rekisteröi kaksi Task Scheduler -tehtävää: **Kulma** (taustakuva, 30 min
-  välein) ja **Kulma-Reindex** (indeksin päivitys, joka yö klo 03:30)
+- asentaa Python-riippuvuudet (mm. `pystray`)
+- käynnistää tray-sovelluksen (`kulma_tray.py`) ja lisää sen Windowsin
+  käynnistykseen (`HKCU\...\Run`)
+- rekisteröi Task Scheduler -tehtävän **Kulma-Reindex** (indeksin päivitys,
+  joka yö klo 03:30)
+- poistaa vanhan **Kulma**-ajastetun tehtävän, jos sellainen on (tray korvaa
+  sen, jottei taustakuva vaihtuisi kahteen kertaan)
 
-Tehtävät ovat rekisteröinnin jälkeen heti aktiivisia aikataulussaan, joten
-tee seuraavat kaksi asiaa ennen kuin ensimmäinen ajo osuu kohdalle:
+## Käyttö: tray-sovellus
 
-### 1. Muokkaa config.json
+Etsi aurinkokuvake ilmoitusalueelta (Windows 11:ssä se voi olla piilotettujen
+kuvakkeiden `^`-listassa; voit raahata sen näkyviin). Kuvakkeen päällä oleva
+vihjeteksti ja valikon kaksi ylintä riviä näyttävät auringon korkeuskulman, nykyisen kuvan ja sen ottopaikan.
+
+**Ottopaikka:** paikannimi (esim. "Helsinki, Suomi") haetaan kuvan GPS-koordinaateista OpenStreetMapin Nominatim-palvelusta. Palveluun lähetetään vain ~1 km tarkkuuteen pyöristetty sijainti, ja tulos tallennetaan välimuistiin (`%APPDATA%\Kulma\places.json`), joten sama paikka haetaan vain kerran. Jos verkkoa ei ole, näytetään koordinaatit; jos kuvassa ei ole GPS-dataa, näytetään "ei GPS-tietoa".
+
+| Toiminto | Mitä tekee |
+|---|---|
+| Vasen klikkaus / **Vaihda taustakuva nyt** | Valitsee ja asettaa taustakuvan heti |
+| **Tauko** | Keskeyttää automaattisen vaihdon (kuvake harmaaksi), uusi klikkaus jatkaa |
+| **Päivitä indeksi** | Ajaa `kulma_index.py`:n taustalla (uudet kuvat mukaan) |
+| **Asetukset…** | Kuvakansio, sijainti, aikavyöhyke ja vaihtoväli |
+| **Avaa loki** | Avaa `kulma.log`in |
+| **Käynnistä Windowsin mukana** | Kytkee automaattikäynnistyksen päälle/pois |
+| **Lopeta** | Sulkee sovelluksen |
+
+Ensimmäisellä käynnistyksellä (kun `config.json` puuttuu) asetusikkuna
+avautuu itsestään. Tallennus indeksoi kuvat taustalla, kun kuvakansio on
+uusi. Sovellus lukee asetukset joka vaihdolla, joten muutokset tulevat
+voimaan ilman uudelleenkäynnistystä (vaihtovälin muutos seuraavan vaihdon
+jälkeen).
+
+### Lisäasetukset (config.json)
+
+Asetusikkuna kattaa perusasiat. Tarkemmat säädöt tehdään suoraan tiedostoon:
 
 ```powershell
 notepad "$env:APPDATA\Kulma\config.json"
@@ -54,6 +81,7 @@ notepad "$env:APPDATA\Kulma\config.json"
   "latitude": 60.1699,
   "longitude": 24.9384,
   "timezone": "Europe/Helsinki",
+  "interval_minutes": 30,
   "elevation_tolerance": 6.0,
   "twilight_elevation_tolerance": 3.0,
   "twilight_band": 12.0,
@@ -61,50 +89,23 @@ notepad "$env:APPDATA\Kulma\config.json"
 }
 ```
 
-Kenttien selitykset ovat samat kuin pääprojektin READMEssä. `photo_dir`
+Kenttien selitykset ovat samat kuin pääprojektin READMEssä.
+`interval_minutes` on tray-sovelluksen vaihtoväli (oletus 30). `photo_dir`
 voidaan kirjoittaa kauttaviivoilla (`C:/Users/...`) - Python käsittelee
 sen oikein myös Windowsilla.
 
-### 2. Ensimmäinen indeksointi
+## Komentorivillä
+
+Skriptit toimivat myös ilman tray-sovellusta:
 
 ```powershell
-python "$env:LOCALAPPDATA\Kulma\bin\kulma_index.py"
+python "$env:LOCALAPPDATA\Kulma\bin\kulma_index.py"       # indeksointi
+python "$env:LOCALAPPDATA\Kulma\bin\kulma_wallpaper.py"   # vaihda taustakuva kerran
+Start-ScheduledTask -TaskName "Kulma-Reindex"                # indeksointi ajastetun tehtävän kautta
+Get-Content "$env:APPDATA\Kulma\kulma.log" -Tail 20 -Wait   # loki
 ```
 
-### 3. Testaa heti (valinnainen)
-
-Ei tarvitse odottaa 30 minuuttia - tehtävän voi käynnistää käsin:
-
-```powershell
-Start-ScheduledTask -TaskName "Kulma"
-```
-
-## Käytön aikaiset komennot
-
-**Tila:**
-```powershell
-Get-ScheduledTaskInfo -TaskName "Kulma"
-Get-ScheduledTaskInfo -TaskName "Kulma-Reindex"
-```
-
-**Manuaaliset ajot:**
-```powershell
-Start-ScheduledTask -TaskName "Kulma"
-Start-ScheduledTask -TaskName "Kulma-Reindex"
-```
-
-**Lokit:**
-```powershell
-Get-Content "$env:APPDATA\Kulma\kulma.log" -Tail 20 -Wait
-```
-
-**Pysäytys / poisto käytöstä (jättää skriptit ja asetukset paikoilleen):**
-```powershell
-Disable-ScheduledTask -TaskName "Kulma"
-Disable-ScheduledTask -TaskName "Kulma-Reindex"
-```
-
-**Kokonaan pois (myös tehtävät poistuvat):**
+**Kokonaan pois (sulkee tray-sovelluksen, poistaa automaattikäynnistyksen ja tehtävät):**
 ```powershell
 cd polku\kulma\windows
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
@@ -116,6 +117,7 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
 %LOCALAPPDATA%\Kulma\bin\
   kulma_index.py
   kulma_wallpaper.py
+  kulma_tray.py
 %LOCALAPPDATA%\Kulma\cache\converted\
   <kuvanimi>.jpg        # HEIC/HEIF-kuvista tehdyt JPEG-muunnokset
 %APPDATA%\Kulma\
@@ -127,11 +129,9 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
 
 ## Tunnetut erot Linux-versioon
 
-- **Ei tue jatkuvaa taustaprosessia offline-tilassa** samalla tavalla kuin
-  `loginctl enable-linger` - Windowsin Task Scheduler ajaa tehtävät vain kun
-  käyttäjä on kirjautuneena (paitsi jos tehtävä erikseen konfiguroidaan
-  ajamaan kirjautumatta, mikä vaatii tallennetun salasanan - ei oletuksena
-  käytössä tässä asennusskriptissä).
+- **Toimii vain kirjautuneena** (vastaava kuin Linuxin `loginctl enable-linger`
+  puuttuu): tray-sovellus ja indeksointitehtävä pyörivät vain kun käyttäjä on
+  kirjautuneena.
 - **Venytystapa (`WallpaperStyle`)** on kovakoodattu "Fill"iin (10), koska
   se vastaa lähinnä Linux-puolen `zoom`-asetusta. Voit vaihtaa sen käsin
   rekisteristä (`HKCU\Control Panel\Desktop\WallpaperStyle`) jos haluat

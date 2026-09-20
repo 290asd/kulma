@@ -214,6 +214,7 @@ def main():
             "sun_elevation": round(elev, 2),
             "sun_azimuth": round(az, 2),
             "gps": has_gps,
+            **({"lat": round(lat, 5), "lon": round(lon, 5)} if has_gps else {}),
             "time_source": exif_source,
         })
 
