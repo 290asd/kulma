@@ -91,6 +91,7 @@ tiedoston omistajaksi rootin ja rikkoo timerien toiminnan myöhemmin.
 | Kenttä | Selitys |
 |---|---|
 | `photo_dir` | Kuvakansio, käydään läpi rekursiivisesti alikansioineen. **Ei** skriptikansio. |
+| `language` | Käyttöliittymän kieli: `fi` (oletus) tai `en`. Vaikuttaa lokiin ja indeksointitulosteeseen (Windowsin tray-sovelluksessa myös valikkoon ja ikkunoihin). Tekstit ovat tiedostossa `bin/kulma_i18n.py`. |
 | `latitude` / `longitude` | Sijaintisi. Käytetään nykyisen aurinkokulman laskentaan, ja oletuksena kuville joilla ei ole omaa GPS-EXIF:iä. |
 | `timezone` | IANA-aikavyöhyke (esim. `Europe/Helsinki`). EXIF ei sisällä aikavyöhykettä, joten tätä käytetään tulkitsemaan kuvien ottoajat oikein. |
 | `elevation_tolerance` | Kuinka monta astetta kuvan aurinkokulma saa poiketa nykyisestä normaalisti (kaukana horisontista, esim. keskipäivä tai syvä yö). 5-8° on hyvä lähtökohta. |

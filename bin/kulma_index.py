@@ -44,13 +44,13 @@ from PIL.ExifTags import TAGS, GPSTAGS
 from astral import Observer
 from astral.sun import elevation, azimuth
 
+from kulma_i18n import t as tr
+
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
 except ImportError:
-    print("HUOM: pillow-heif ei ole asennettu - HEIC/HEIF-kuvien EXIF-data "
-          "(ottoaika, GPS) ei ole luettavissa. Asenna: pip install pillow-heif "
-          "--break-system-packages", file=sys.stderr)
+    print(tr("idx.warn_heif"), file=sys.stderr)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".heic", ".heif"}
 
@@ -96,8 +96,8 @@ def load_overrides() -> dict:
 
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
-        print(f"Virhe: config-tiedostoa ei löydy: {config_path}", file=sys.stderr)
-        print("Kopioi config.example.json paikoilleen ja muokkaa sitä ensin.", file=sys.stderr)
+        print(tr("idx.err_config", path=config_path), file=sys.stderr)
+        print(tr("idx.err_config_hint"), file=sys.stderr)
         sys.exit(1)
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -178,7 +178,7 @@ def main():
     config = load_config(Path(args.config).expanduser())
     photo_dir = Path(args.photo_dir or config["photo_dir"]).expanduser().resolve()
     if not photo_dir.is_dir():
-        print(f"Virhe: kansiota ei löydy: {photo_dir}", file=sys.stderr)
+        print(tr("idx.err_folder", path=photo_dir), file=sys.stderr)
         sys.exit(1)
 
     tz = ZoneInfo(config["timezone"])
@@ -189,7 +189,7 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     files = [p for p in photo_dir.rglob("*") if p.suffix.lower() in IMAGE_EXTENSIONS]
-    print(f"Löytyi {len(files)} kuvaa kansiosta {photo_dir}")
+    print(tr("idx.found", n=len(files), dir=photo_dir))
 
     records = []
     skipped = 0
@@ -239,36 +239,27 @@ def main():
         })
 
         if i % 200 == 0:
-            print(f"  ...käsitelty {i}/{len(files)}")
+            print(tr("idx.progress", i=i, n=len(files)))
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
 
-    print(f"\nValmis. Indeksi tallennettu: {out_path}")
-    print(f"Kuvia indeksoitu: {len(records)} ({skipped} ohitettu virheiden vuoksi)")
+    print("\n" + tr("idx.done", path=out_path))
+    print(tr("idx.indexed", n=len(records), skipped=skipped))
     gps_count = sum(1 for r in records if r["gps"])
-    print(f"Kuvia joissa oli GPS-data: {gps_count} / {len(records)}")
+    print(tr("idx.gps_count", gps=gps_count, n=len(records)))
     if records:
         elevations = [r["sun_elevation"] for r in records]
-        print(f"Aurinkokulmien vaihteluväli: {min(elevations):.1f}° ... {max(elevations):.1f}°")
+        print(tr("idx.range", lo=min(elevations), hi=max(elevations)))
 
     if mtime_fallback_files:
-        print(
-            f"\nHUOM: {len(mtime_fallback_files)} kuvasta ei saatu luettua EXIF-ottoaikaa "
-            f"(kuva ei avautunut tai EXIF puuttui). Näille käytettiin TIEDOSTON "
-            f"MUOKKAUSAIKAA, joka voi poiketa merkittävästi todellisesta ottohetkestä "
-            f"(esim. jos kuva on kopioitu/siirretty myöhemmin) - aurinkokulma näille "
-            f"kuville on siis todennäköisesti VÄÄRIN LASKETTU."
-        )
-        print("Ensimmäiset esimerkit:")
+        print("\n" + tr("idx.warn_mtime", n=len(mtime_fallback_files)))
+        print(tr("idx.examples"))
         for p in mtime_fallback_files[:10]:
             print(f"  - {p}")
         if len(mtime_fallback_files) > 10:
-            print(f"  ... ja {len(mtime_fallback_files) - 10} muuta")
-        print(
-            "Jos nämä ovat HEIC/HEIF-kuvia, varmista että 'pillow-heif' on "
-            "asennettu: pip install pillow-heif --break-system-packages"
-        )
+            print(tr("idx.and_more", n=len(mtime_fallback_files) - 10))
+        print(tr("idx.heif_hint"))
 
 
 if __name__ == "__main__":

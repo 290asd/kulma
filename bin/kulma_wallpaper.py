@@ -24,9 +24,10 @@ Valintaperiaate:
   4. Jos yksikään kuva ei osu toleranssin sisään (esim. harva kuvamäärä),
      otetaan lähimmät ehdokkaat varajärjestelmänä - jokin kuva vaihtuu
      joka kerta, valinta ei koskaan jää tyhjäksi.
-  5. Edellinen valinta suljetaan pois ehdokkaista ennen arvontaa, joten
-     sama kuva ei voi tulla kahdesti peräkkäin - paitsi jos se on ainoa
-     kelvollinen ehdokas.
+  5. Ehdokkaita kierrätetään: jo näytetyt kuvat suljetaan pois kunnes kaikki
+     nykyiset ehdokkaat on käyty läpi, minkä jälkeen alkaa uusi kierros.
+     Edellinen kuva ei voi tulla kahdesti peräkkäin; jos ainoa ehdokas on jo
+     käytössä, haetaan lähimmät muut kuvat, jotta vaihto onnistuu aina.
 
 Ajetaan ajastettuna: Linuxilla systemd-timerin kautta (katso
 systemd/kulma.timer), Windowsilla Task Schedulerin kautta (katso
@@ -53,6 +54,8 @@ except ImportError:
 
 from astral import Observer
 from astral.sun import elevation, azimuth
+
+from kulma_i18n import t as tr
 
 def _config_root() -> Path:
     """Kulman asetuskansio - käyttöjärjestelmäkohtainen.
@@ -86,6 +89,7 @@ CONVERTED_CACHE_DIR = _cache_root() / "converted"
 
 HEIC_EXTENSIONS = {".heic", ".heif"}
 FALLBACK_CANDIDATE_COUNT = 3  # jos mikään kuva ei osu toleranssiin
+HISTORY_LIMIT = 500           # kierroshistorian enimmäispituus
 
 
 def log(msg: str):
@@ -108,11 +112,20 @@ def read_last_choice() -> str | None:
         return None
 
 
-def write_last_choice(path: str):
+def read_history() -> list[str]:
+    """Nykyisellä "kierroksella" jo näytetyt kuvat (ks. main())."""
+    try:
+        with open(LAST_CHOICE_PATH, "r", encoding="utf-8") as f:
+            return list(json.load(f).get("history", []))
+    except Exception:
+        return []
+
+
+def write_last_choice(path: str, history: list[str] | None = None):
     try:
         LAST_CHOICE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(LAST_CHOICE_PATH, "w", encoding="utf-8") as f:
-            json.dump({"path": path}, f)
+            json.dump({"path": path, "history": history or []}, f)
     except Exception:
         pass
 
@@ -248,10 +261,10 @@ def set_wallpaper(path: Path):
 
 def main():
     if not CONFIG_PATH.exists():
-        log(f"Virhe: config-tiedostoa ei löydy ({CONFIG_PATH}).")
+        log(tr("wp.err_config", path=CONFIG_PATH))
         sys.exit(1)
     if not INDEX_PATH.exists():
-        log(f"Virhe: indeksiä ei löydy ({INDEX_PATH}). Aja ensin kulma_index.py.")
+        log(tr("wp.err_index", path=INDEX_PATH))
         sys.exit(1)
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -278,15 +291,15 @@ def main():
     # nollasta), jotta yöllä ei valikoidu selvästi kirkkaampia päiväkuvia.
     if abs(current_elev) <= twilight_band:
         effective_tolerance = twilight_tolerance
-        tolerance_reason = f"hämärävyöhyke (|{current_elev:.1f}°| <= {twilight_band}°)"
+        tolerance_reason = tr("wp.reason_twilight", elev=current_elev, band=twilight_band)
     else:
         effective_tolerance = tolerance
-        tolerance_reason = "normaali"
+        tolerance_reason = tr("wp.reason_normal")
 
     # Vain kuvat jotka löytyvät levyltä
     records = [r for r in records if Path(r["path"]).exists()]
     if not records:
-        log("Indeksissä ei ole yhtään olemassa olevaa kuvaa. Aja kulma_index.py uudelleen.")
+        log(tr("wp.no_photos"))
         return
 
     # Vain kuvat joilla on sijainti ja oikea ottoaika (EXIF tai käsin annettu):
@@ -307,7 +320,7 @@ def main():
 
     if within_tolerance:
         candidates = within_tolerance
-        mode = f"toleranssin sisällä ({tolerance_reason}, {effective_tolerance}°)"
+        mode = tr("wp.mode_tol", reason=tolerance_reason, tol=effective_tolerance)
     else:
         # Varajärjestelmä: otetaan N lähintä koko indeksistä. Yöllä/hämärässä
         # tämä voi silti tarkoittaa kirkkaampaa kuvaa jos kokoelmassa ei ole
@@ -315,18 +328,27 @@ def main():
         # (liian vähän yökuvia kokoelmassa) on helppo huomata.
         scored.sort(key=lambda t: t[1])
         candidates = scored[:FALLBACK_CANDIDATE_COUNT]
-        mode = f"fallback (lähimmät ehdokkaat, {tolerance_reason} toleranssi {effective_tolerance}° ei riittänyt)"
+        mode = tr("wp.mode_fallback", reason=tolerance_reason, tol=effective_tolerance)
 
 
     # Estetään sama kuva kahdesti peräkkäin - suodatetaan edellinen valinta
     # pois, mutta vain jos jäljelle jää vielä vaihtoehtoja.
+    # Kierrätys: jokainen ehdokas näytetään kerran ennen kuin mikään toistuu.
+    # Kun kaikki nykyiset ehdokkaat on käyty läpi, aloitetaan uusi kierros, joten
+    # vaihto jatkuu loputtomiin eikä lopu "vaihtoehdot loppuivat" -tilaan.
+    # Edellinen kuva ei koskaan tule kahdesti peräkkäin.
     last_choice = read_last_choice()
-    if last_choice is not None:
-        filtered = [t for t in candidates if t[0]["path"] != last_choice]
-        if filtered:
-            candidates = filtered
-        else:
-            log("Kaikki ehdokkaat olisivat sama kuin edellinen valinta - ei suodatettu pois.")
+    history = read_history()
+    unseen = [t for t in candidates if t[0]["path"] not in history and t[0]["path"] != last_choice]
+    if not unseen:
+        history = []  # kierros käyty läpi -> uusi kierros
+        unseen = [t for t in candidates if t[0]["path"] != last_choice]
+    if not unseen:
+        # Ainoa ehdokas on jo taustakuvana: laajennetaan lähimpiin muihin kuviin,
+        # jotta vaihto onnistuu (muuten "Vaihda nyt" ei tekisi mitään).
+        unseen = sorted((t for t in scored if t[0]["path"] != last_choice), key=lambda t: t[1])[:FALLBACK_CANDIDATE_COUNT]
+        mode += tr("wp.mode_widened")
+    candidates = unseen or candidates
 
     # Painotettu satunnaisvalinta: mitä lähempänä, sitä todennäköisempi.
     # Neliöllinen painotus (ei lineaarinen) suosii voimakkaasti lähimpiä
@@ -340,15 +362,12 @@ def main():
 
     try:
         set_wallpaper(display_path)
-        write_last_choice(str(chosen_path))
-        conversion_note = f" (näytetään JPEG-muunnoksena: {display_path.name})" if display_path != chosen_path else ""
-        log(
-            f"Aurinkokulma nyt: {current_elev:.1f}° (atsimuutti {current_az:.1f}°) | "
-            f"valittu kuva: {chosen_path.name}{conversion_note} (kuvan kulma {chosen_record['sun_elevation']:.1f}°, "
-            f"ero {chosen_elev_diff:.1f}°) | {mode}, {len(candidates)} ehdokasta"
-        )
+        write_last_choice(str(chosen_path), (history + [chosen_record["path"]])[-HISTORY_LIMIT:])
+        conversion_note = tr("wp.conv_note", name=display_path.name) if display_path != chosen_path else ""
+        log(tr("wp.chosen", elev=current_elev, az=current_az, name=chosen_path.name, conv=conversion_note,
+               photo_elev=chosen_record["sun_elevation"], diff=chosen_elev_diff, mode=mode, n=len(candidates)))
     except (subprocess.CalledProcessError, RuntimeError) as e:
-        log(f"Virhe asetettaessa taustakuvaa: {e}")
+        log(tr("wp.err_set", e=e))
         sys.exit(1)
 
 

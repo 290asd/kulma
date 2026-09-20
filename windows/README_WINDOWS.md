@@ -43,6 +43,20 @@ Skripti:
 - poistaa vanhan **Kulma**-ajastetun tehtävän, jos sellainen on (tray korvaa
   sen, jottei taustakuva vaihtuisi kahteen kertaan)
 
+## Kuvake
+
+Sovelluksen kuvake yhdistää emojit 📐 ja ☀️. `install.ps1` luo sen ajamalla
+`make_icon.py`:n, joka lataa kaksi kuvaa Applen emoji-kuvakirjastosta
+(`emoji-datasource-apple@16.0.0`, jsDelivr; tiedostojen SHA-256 tarkistetaan) ja
+yhdistää ne. Kuvake tallentuu tiedostoihin `%LOCALAPPDATA%\Kulma\icon\kulma.ico` ja
+`kulma.png`, ja sitä käytetään tray-kuvakkeena, Käynnistys-valikon pikakuvakkeessa sekä
+sovelluksen ikkunoissa. Tauolla tray-kuvake on harmaa.
+
+**Applen emoji-kuvat ovat Applen tekijänoikeudella suojattuja, joten niitä ei ole
+tässä repossa** - ne ladataan vain omalle koneellesi. Jos lataus epäonnistuu (ei
+verkkoa), tray käyttää piirrettyä oletuskuvaketta; voit yrittää uudelleen komennolla
+`python windows\make_icon.py` ja käynnistää sovelluksen uudelleen.
+
 ## Käyttö: tray-sovellus
 
 Etsi aurinkokuvake ilmoitusalueelta (Windows 11:ssä se voi olla piilotettujen
@@ -53,13 +67,14 @@ vihjeteksti ja valikon kolme ylintä riviä näyttävät auringon korkeuskulman,
 
 | Toiminto | Mitä tekee |
 |---|---|
-| Vasen klikkaus / **Vaihda taustakuva nyt** | Valitsee ja asettaa taustakuvan heti |
+| Vasen klikkaus / **Vaihda taustakuva nyt** | Valitsee ja asettaa taustakuvan heti. Vaihtoa voi jatkaa loputtomiin: kuvat kierrätetään (kaikki nykyiset ehdokkaat käydään läpi ennen kuin mikään toistuu) ja uusi kierros alkaa itsestään |
 | **Tauko** | Keskeyttää automaattisen vaihdon (kuvake harmaaksi), uusi klikkaus jatkaa |
 | **Päivitä indeksi** | Ajaa `kulma_index.py`:n taustalla (uudet kuvat mukaan) ja kysyy sen jälkeen puuttuvat tiedot, ks. alla |
-| **Asetukset…** | Kuvakansio, sijainti, aikavyöhyke ja vaihtoväli |
+| **Asetukset…** | Kuvakansio, sijainti, aikavyöhyke, vaihtoväli ja **kieli** (Suomi / English). Kielenvaihto tulee voimaan heti kun asetusikkuna suljetaan |
 | **Avaa loki** | Avaa `kulma.log`in |
 | **Käynnistä Windowsin mukana** | Kytkee automaattikäynnistyksen päälle/pois |
-| **Lopeta** | Sulkee sovelluksen |
+| **Tietoja…** | Ikkuna, jossa kuvake, versionumero, käytettyjen kirjastojen versiot, kuvakirjaston tilastot (kuvien määrä, sijainti tiedossa / puuttuu, ottoaika puuttuu, puutteellisten määrä ja 3 yleisintä sijaintia) sekä linkki GitHubiin. Versio on `__version__` tiedostossa `kulma_tray.py`. Yleisimpien sijaintien nimet haetaan tarvittaessa Nominatimista (max 3 hakua, välimuistissa) |
+| **Lopeta** | Sulkee sovelluksen. Käynnistä uudelleen Käynnistys-valikosta (hae "Kulma"); pikakuvake luodaan asennuksessa |
 
 Ensimmäisellä käynnistyksellä (kun `config.json` puuttuu) asetusikkuna
 avautuu itsestään. Tallennus indeksoi kuvat taustalla, kun kuvakansio on
@@ -105,6 +120,7 @@ notepad "$env:APPDATA\Kulma\config.json"
   "longitude": 24.9384,
   "timezone": "Europe/Helsinki",
   "interval_minutes": 30,
+  "language": "fi",
   "elevation_tolerance": 6.0,
   "twilight_elevation_tolerance": 3.0,
   "twilight_band": 12.0,
@@ -113,7 +129,7 @@ notepad "$env:APPDATA\Kulma\config.json"
 ```
 
 Kenttien selitykset ovat samat kuin pääprojektin READMEssä.
-`interval_minutes` on tray-sovelluksen vaihtoväli (oletus 30). `photo_dir`
+`interval_minutes` on tray-sovelluksen vaihtoväli (oletus 30). `language` on käyttöliittymän kieli, `"fi"` (oletus) tai `"en"`; asetusikkunan kielivalinta tallentaa sen. Kaikki sovelluksen tekstit (tray-valikko, ikkunat, loki ja indeksointituloste) löytyvät tiedostosta `bin/kulma_i18n.py`. `photo_dir`
 voidaan kirjoittaa kauttaviivoilla (`C:/Users/...`) - Python käsittelee
 sen oikein myös Windowsilla.
 
@@ -141,8 +157,11 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
   kulma_index.py
   kulma_wallpaper.py
   kulma_tray.py
+  kulma_i18n.py           # käyttöliittymätekstit (fi/en)
 %LOCALAPPDATA%\Kulma\cache\converted\
   <kuvanimi>.jpg        # HEIC/HEIF-kuvista tehdyt JPEG-muunnokset
+%LOCALAPPDATA%\Kulma\icon\
+  kulma.ico, kulma.png  # sovelluksen kuvake (📐☀️)
 %APPDATA%\Kulma\
   config.json            # asetukset
   index.json              # kuvaindeksi

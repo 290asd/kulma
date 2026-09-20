@@ -19,6 +19,8 @@ Get-CimInstance Win32_Process -Filter "Name LIKE 'pythonw%'" |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host "-> Tray-sovellus suljettu" }
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Kulma" -ErrorAction SilentlyContinue
 Write-Host "-> Automaattikaynnistys poistettu"
+Remove-Item (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Kulma.lnk") -ErrorAction SilentlyContinue
+Write-Host "-> Kaynnistys-valikon pikakuvake poistettu"
 
 
 foreach ($name in @("Kulma", "Kulma-Reindex")) {

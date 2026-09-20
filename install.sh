@@ -21,6 +21,7 @@ mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
 
 cp "$SCRIPT_DIR/bin/kulma_index.py" "$BIN_DIR/"
 cp "$SCRIPT_DIR/bin/kulma_wallpaper.py" "$BIN_DIR/"
+cp "$SCRIPT_DIR/bin/kulma_i18n.py" "$BIN_DIR/"
 chmod +x "$BIN_DIR/kulma_index.py" "$BIN_DIR/kulma_wallpaper.py"
 echo "-> Skriptit kopioitu: $BIN_DIR"
 

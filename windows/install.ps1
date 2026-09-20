@@ -58,6 +58,7 @@ Write-Host "-> Python-tulkki: $pythonwExe"
 Copy-Item (Join-Path $RepoRoot "bin\kulma_index.py")     $BinDir -Force
 Copy-Item (Join-Path $RepoRoot "bin\kulma_wallpaper.py") $BinDir -Force
 Copy-Item (Join-Path $RepoRoot "bin\kulma_tray.py")      $BinDir -Force
+Copy-Item (Join-Path $RepoRoot "bin\kulma_i18n.py")      $BinDir -Force
 Write-Host "-> Skriptit kopioitu: $BinDir"
 
 $configPath = Join-Path $ConfigDir "config.json"
@@ -75,6 +76,15 @@ if ($LASTEXITCODE -ne 0) {
     Write-Warning "pip install epaonnistui - asenna riippuvuudet manuaalisesti: $pythonExe -m pip install astral Pillow pillow-heif pystray"
 }
 
+# --- Kuvake ---------------------------------------------------------------------
+# 📐☀️-kuvake luodaan Applen emoji-kuvista (ladataan tassa, ei ole repossa).
+# Jos lataus epaonnistuu, tray kayttaa piirrettya oletuskuvaketta.
+& $pythonExe (Join-Path $ScriptDir "make_icon.py")
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Kuvakkeen luonti epaonnistui (ei verkkoa?) - kaytetaan oletuskuvaketta. Voit yrittaa uudelleen: python windows\make_icon.py"
+}
+$iconPath = Join-Path $env:LOCALAPPDATA "Kulma\icon\kulma.ico"
+
 # --- Task Scheduler -----------------------------------------------------------
 
 $reindexScript   = Join-Path $BinDir "kulma_index.py"
@@ -91,6 +101,18 @@ $trayScript = Join-Path $BinDir "kulma_tray.py"
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Kulma" `
     -Value "`"$pythonwExe`" `"$trayScript`""
 Write-Host "-> Tray-sovellus kaynnistyy Windowsin mukana"
+
+# Kaynnistysvalikon pikakuvake, jotta sovelluksen saa kaynnistettya uudelleen
+# (esim. valikon "Lopeta"-valinnan jalkeen) ilman kirjautumista uudelleen.
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut(
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Kulma.lnk"))
+$lnk.TargetPath       = $pythonwExe
+$lnk.Arguments        = "`"$trayScript`""
+$lnk.WorkingDirectory = $BinDir
+$lnk.Description      = "Kulma - taustakuva auringon korkeuskulman mukaan"
+if (Test-Path $iconPath) { $lnk.IconLocation = "$iconPath,0" }
+$lnk.Save()
+Write-Host "-> Pikakuvake lisatty Kaynnistys-valikkoon (hae 'Kulma')"
 
 # Uudelleenasennuksessa vanha tray-instanssi pitaa sulkea ennen kuin uusi kaynnistetaan.
 Get-CimInstance Win32_Process -Filter "Name LIKE 'pythonw%'" |
