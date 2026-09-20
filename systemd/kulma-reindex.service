@@ -1,0 +1,6 @@
+[Unit]
+Description=Kulma - päivitä kuvaindeksi (aurinkokulmat)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/bin/kulma_index.py

@@ -1,0 +1,10 @@
+{
+  "photo_dir": "/home/USERNAME/Kuvat/Taustakuvat",
+  "latitude": 60.1699,
+  "longitude": 24.9384,
+  "timezone": "Europe/Helsinki",
+  "elevation_tolerance": 6.0,
+  "twilight_elevation_tolerance": 3.0,
+  "twilight_band": 12.0,
+  "azimuth_weight": 0.05
+}
