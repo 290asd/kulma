@@ -9,7 +9,7 @@ config.json) and offers an icon menu:
   - left click / "Change wallpaper now"
   - Pause / resume the automatic change
   - Update index (asks for missing GPS locations and capture times)
-  - Settings (tkinter window, includes the language)
+  - Settings (tkinter window: folder, location, interval, clock alignment, language, lock screen)
   - Open log
   - Start with Windows
   - About (version, libraries, photo library statistics, GitHub link)
@@ -120,9 +120,12 @@ def settings_window():
     ttk.Label(frm, text=tr("set.language")).grid(row=len(fields), column=0, sticky="w", pady=3)
     ttk.Combobox(frm, textvariable=lang_var, values=list(i18n.LANGUAGES.values()), state="readonly",
                  width=20).grid(row=len(fields), column=1, sticky="w", pady=3, padx=6)
+    align_var = tk.BooleanVar(value=cfg.get("align_to_clock", True))
+    ttk.Checkbutton(frm, text=tr("set.align"), variable=align_var).grid(
+        row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=3)
     lock_var = tk.BooleanVar(value=cfg.get("lock_screen", True))
     ttk.Checkbutton(frm, text=tr("set.lockscreen"), variable=lock_var).grid(
-        row=len(fields) + 1, column=0, columnspan=3, sticky="w", pady=3)
+        row=len(fields) + 2, column=0, columnspan=3, sticky="w", pady=3)
 
     def browse():
         d = filedialog.askdirectory(initialdir=vars_["photo_dir"].get() or None)
@@ -140,6 +143,7 @@ def settings_window():
                 "timezone": vars_["timezone"].get().strip(),
                 "interval_minutes": max(1, int(vars_["interval_minutes"].get())),
                 "language": next(k for k, v in i18n.LANGUAGES.items() if v == lang_var.get()),
+                "align_to_clock": align_var.get(),
                 "lock_screen": lock_var.get(),
             }
             ZoneInfo(new["timezone"])
@@ -162,7 +166,7 @@ def settings_window():
         root.destroy()
 
     btns = ttk.Frame(frm)
-    btns.grid(row=len(fields) + 2, column=0, columnspan=3, pady=(10, 0), sticky="e")
+    btns.grid(row=len(fields) + 3, column=0, columnspan=3, pady=(10, 0), sticky="e")
     ttk.Button(btns, text=tr("set.save"), command=save).pack(side="left", padx=4)
     ttk.Button(btns, text=tr("set.cancel"), command=root.destroy).pack(side="left")
     root.mainloop()
@@ -592,6 +596,31 @@ def status_text() -> str:
         return tr("status.nosettings")
 
 
+def _clock_position(step: int, now: datetime) -> float:
+    """Seconds since local midnight, modulo the step (i.e. how far past the last clock boundary we are)."""
+    since_midnight = now.hour * 3600 + now.minute * 60 + now.second + now.microsecond / 1e6
+    return since_midnight % step
+
+
+def seconds_until_next_change(cfg: dict, now: datetime | None = None) -> float:
+    """How long the timer should wait. With "align_to_clock" (default) the change happens on clock
+    boundaries counted from midnight, e.g. at :00 and :30 with a 30 min interval; otherwise a
+    full interval after the previous change."""
+    step = max(1, int(cfg.get("interval_minutes", DEFAULT_INTERVAL_MIN))) * 60
+    if not cfg.get("align_to_clock", True):
+        return step
+    return step - _clock_position(step, now or datetime.now()) + 0.5  # just after the boundary
+
+
+def change_is_due(cfg: dict, last_change: float, now: datetime | None = None) -> bool:
+    """True if a change should already have happened since last_change (used after waking up)."""
+    step = max(1, int(cfg.get("interval_minutes", DEFAULT_INTERVAL_MIN))) * 60
+    now = now or datetime.now()
+    if not cfg.get("align_to_clock", True):
+        return now.timestamp() - last_change >= step
+    return last_change < now.timestamp() - _clock_position(step, now)  # a boundary has passed since
+
+
 def boost_process():
     """Keeps the tray process responsive right after waking up: slightly higher priority and
     no EcoQoS/power throttling (Windows may otherwise slow down background processes)."""
@@ -782,13 +811,12 @@ def main():
     def on_wake():
         """The screen turned on or the system resumed: if a change is already due (the timer could not
         run while asleep), do it right away. The lock screen helper is pre-warmed in parallel."""
-        interval = max(1, int(load_config().get("interval_minutes", DEFAULT_INTERVAL_MIN))) * 60
-        elapsed = time.time() - state["last_change"]
-        if state["paused"] or lock.locked() or wake.is_set() or elapsed < interval:
+        cfg = load_config()
+        if state["paused"] or lock.locked() or wake.is_set() or not change_is_due(cfg, state["last_change"]):
             return
-        if load_config().get("lock_screen", True):
+        if cfg.get("lock_screen", True):
             wp.prewarm_lock_helper()
-        wp.log(tr("tray.resumed", sec=int(elapsed)))
+        wp.log(tr("tray.resumed", sec=int(time.time() - state["last_change"])))
         wake.set()  # the timer thread changes the wallpaper immediately
 
     def quit_app(*_):
@@ -800,7 +828,7 @@ def main():
         while not state.get("quit"):
             if not state["paused"]:
                 change_now()
-            wake.wait(max(1, int(load_config().get("interval_minutes", DEFAULT_INTERVAL_MIN))) * 60)
+            wake.wait(seconds_until_next_change(load_config()))
             wake.clear()
 
     icon = pystray.Icon(

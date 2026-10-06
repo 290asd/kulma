@@ -80,7 +80,7 @@ the menu says it is missing.
 | Left click / **Change wallpaper now** | Chooses and sets a wallpaper right away. Changing can be continued endlessly: photos are cycled (all current candidates are gone through before any repeats) and a new round starts by itself |
 | **Pause** | Pauses the automatic change (the icon turns grey), another click resumes |
 | **Update index** | Runs `kulma_index.py` in the background (new photos included) and afterwards asks for the missing details, see below |
-| **Settings…** | Photo folder, location, time zone, change interval, **language** (Suomi / English) and whether the **lock screen** is updated too. A language change takes effect as soon as the settings window is closed |
+| **Settings…** | Photo folder, location, time zone, change interval, whether to **change on the clock**, **language** (Suomi / English) and whether the **lock screen** is updated too. A language change takes effect as soon as the settings window is closed |
 | **Open log** | Opens `kulma.log` |
 | **Start with Windows** | Turns automatic startup on/off |
 | **About…** | A window with the icon, the version number, the versions of the libraries used, photo library statistics (number of photos, location known / missing, capture time missing, number of incomplete photos and the 3 most common locations) and a link to GitHub. The version is `__version__` in `kulma_tray.py`. The names of the most common locations are looked up from Nominatim when needed (max 3 lookups, cached) |
@@ -104,8 +104,8 @@ process that is started on demand and closed again after a minute of inactivity.
 
 The app does not prevent the computer from sleeping. While the PC sleeps
 (Modern Standby) nothing can run, so when it **wakes up** - the screen turns on
-or the system resumes - the app checks whether a change is already due (the
-change interval has passed since the last change) and if so changes the
+or the system resumes - the app checks whether a change is already due (a clock
+boundary - or with clock alignment off, a full interval - has passed since the last change) and if so changes the
 wallpaper and the lock screen immediately, and starts the lock screen helper in
 parallel to save about a second. The app also runs with slightly raised
 priority and without power throttling, so that it gets CPU time quickly after
@@ -151,6 +151,7 @@ notepad "$env:APPDATA\Kulma\config.json"
   "longitude": 24.9384,
   "timezone": "Europe/Helsinki",
   "interval_minutes": 30,
+  "align_to_clock": true,
   "language": "en",
   "lock_screen": true,
   "elevation_tolerance": 6.0,
@@ -162,6 +163,7 @@ notepad "$env:APPDATA\Kulma\config.json"
 
 The explanations of the fields are the same as in the main project README.
 `interval_minutes` is the change interval of the tray app (default 30).
+`align_to_clock` (default `true`) makes the wallpaper change on the clock instead of a full interval after the previous change: with `interval_minutes` 30 at :00 and :30, with 15 at :00, :15, :30 and :45, with 60 on the hour (boundaries are counted from midnight; a manual change does not shift the schedule). With `false` the next change comes a full interval after the previous one.
 `lock_screen` (default `true`) sets the desktop photo as the lock screen image too.
 `language` is the language of the user interface, `"fi"` (default when the key
 is missing) or `"en"`; the language choice in the settings window saves it. All

@@ -93,6 +93,7 @@ the timers later.
 | Field | Description |
 |---|---|
 | `photo_dir` | Photo folder, walked through recursively including subfolders. **Not** the script folder. |
+| `align_to_clock` | Windows tray app only (default `true`): change on the clock (e.g. at :00 and :30 with `interval_minutes` 30) instead of a full interval after the previous change. On Linux the systemd timer decides. |
 | `lock_screen` | Windows only (default `true`): also set the chosen photo as the lock screen image. |
 | `language` | Language of the texts: `fi` (default) or `en`. Affects the log and the indexing output (in the Windows tray app also the menu and windows). The texts are in `bin/kulma_i18n.py`. |
 | `latitude` / `longitude` | Your location. Used to calculate the current sun elevation, and by default for photos that have no GPS EXIF of their own. |
