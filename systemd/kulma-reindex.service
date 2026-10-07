@@ -1,6 +1,0 @@
-[Unit]
-Description=Kulma - update the photo index (sun angles)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 %h/.local/bin/kulma_index.py

@@ -1,232 +1,131 @@
 # Kulma
 
-Your desktop wallpaper changes automatically to a photo that was taken in
-sunlight as similar as possible to the sunlight you have right now at your
-location. Works on Ubuntu/GNOME (systemd timers) and on Windows (tray app).
+Your Windows desktop wallpaper (and lock screen) changes automatically to a
+photo that was taken in sunlight as similar as possible to the sunlight you
+have right now at your location.
 
-The idea: the time of day alone does not tell what the light looks like —
+The idea: the time of day alone does not tell what the light looks like -
 4 pm in November and 4 pm in June look completely different. The **sun
 elevation**, on the other hand, tells the quality of the light directly,
 regardless of the season, so Kulma calculates it for each of your photos
-(based on their EXIF data) and compares it with the current sun elevation
-when choosing the wallpaper.
+(from their EXIF capture time and GPS location) and compares it with the
+current sun elevation when choosing the wallpaper.
+
+Everything happens locally - your photos stay on your machine. The only
+network use is looking up place names from OpenStreetMap (see below).
 
 ## How it works
 
-1. **`kulma_index.py`** walks through your photo folder (recursively), reads
-   the EXIF capture time and the possible GPS location of each photo, and uses
-   the `astral` library to calculate the sun elevation and azimuth at the
-   moment the photo was taken. The result is saved to `index.json`.
-2. **`kulma_wallpaper.py`** calculates the sun elevation *right now* and
-   picks from the index a photo whose stored angle is closest — using a
-   weighted random choice, so that the choice varies but is not completely
-   arbitrary. Candidates are cycled (every candidate is shown once before any
-   repeats) and the same photo can never come twice in a row.
-   Only photos that have a location (GPS) and a capture time are considered;
-   the others are left out, because their sun angle would be a guess.
-3. Two systemd timers run these automatically: the wallpaper changes once an
-   hour by default, and the index is updated at night to pick up new photos.
-
-Everything happens locally — your photos stay on your machine, no cloud
-services.
-
-**Windows user?** See [`windows/README_WINDOWS.md`](windows/README_WINDOWS.md) —
-the same `kulma_index.py`/`kulma_wallpaper.py` scripts work as they are, but
-setting the wallpaper and the scheduling are handled by Windows' own
-mechanisms (a tray app and Task Scheduler instead of systemd timers).
-
-## Dependencies
-
-- Python 3.9+ (zoneinfo support)
-- GNOME desktop (`gsettings`-based wallpaper setting)
-- systemd (user-level timers)
-
-Python packages:
-```bash
-pip install astral pillow-heif --break-system-packages
-```
-(`pillow-heif` is needed if your photos are in `.HEIC`/`.HEIF` format, e.g.
-the default format of iPhones — without it the EXIF capture time and GPS
-of those photos cannot be read, and the system has to fall back to the
-inaccurate file modification time.)
-
-Pillow (`PIL`) usually comes preinstalled on Ubuntu. If not:
-```bash
-pip install Pillow --break-system-packages
-```
+1. **Indexing** walks through your photo folder (recursively), reads the EXIF
+   capture time and GPS location of each photo, and calculates the sun
+   elevation and azimuth at the moment it was taken (NOAA solar equations).
+   The result is saved to `index.json`. The index is updated from the menu, and
+   automatically when it is more than a day old.
+2. **Choosing** calculates the sun elevation *right now* and picks a photo
+   whose stored angle is closest, with a weighted random choice so that the
+   choice varies but is not arbitrary. Near the horizon a stricter tolerance is
+   used, because the light changes quickly per degree there. Candidates are
+   cycled (every candidate is shown once before any repeats) and the same photo
+   never comes twice in a row. Only photos that have a location and a capture
+   time are considered; the others would have a guessed sun angle.
+3. A **tray app** (sun icon in the notification area) changes the wallpaper on
+   the clock, by default at :00 and :30, and right after the computer wakes up
+   if a change was missed while it slept.
 
 ## Installation
 
-```bash
-git clone https://github.com/290asd/kulma.git kulma
-cd kulma
-./install.sh
+Requires Windows 10 2004 or newer and the
+[.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
+HEIC/HEIF photos (the iPhone default) additionally need the "HEIF Image
+Extensions" and "HEVC Video Extensions" from the Microsoft Store (often
+preinstalled).
+
+Build the app (needs the .NET 10 SDK):
+
+```powershell
+dotnet publish src/Kulma -c Release -o publish
 ```
 
-The script copies the files into place (`~/.local/bin/`, `~/.config/kulma/`,
-`~/.config/systemd/user/`) but does not enable anything automatically,
-because the configuration has to be edited first.
+Copy `publish\Kulma.exe` to e.g. `%LOCALAPPDATA%\Kulma\Kulma.exe` and start it.
+On the first start the settings window opens; saving indexes the photos. Then
+tick **Start with Windows** in the tray menu - it also adds a "Kulma" shortcut
+to the Start Menu.
 
-### 1. Edit config.json
+To uninstall: untick **Start with Windows**, choose **Quit**, and delete
+`%LOCALAPPDATA%\Kulma`, `%APPDATA%\Kulma` and the Start Menu shortcut.
 
-```bash
-nano ~/.config/kulma/config.json
-```
+## Usage
 
-**Do not use sudo** to edit this file — it is in your own user's directory,
-not root's. Editing with sudo changes the file's owner to root and breaks
-the timers later.
+Find the sun icon in the notification area (in Windows 11 it may be in the
+hidden-icons `^` list; you can drag it into view). The tooltip and the top rows
+of the menu show the sun elevation, the current photo, and where and when it was
+taken.
 
-```json
-{
-  "photo_dir": "/home/you/Pictures/Wallpapers",
-  "latitude": 60.1699,
-  "longitude": 24.9384,
-  "timezone": "Europe/Helsinki",
-  "elevation_tolerance": 6.0,
-  "twilight_elevation_tolerance": 3.0,
-  "twilight_band": 12.0,
-  "azimuth_weight": 0.05
-}
-```
+| Action | What it does |
+|---|---|
+| Left click / **Change wallpaper now** | Chooses and sets a wallpaper right away |
+| **Pause** | Pauses the automatic change (the icon turns grey) |
+| **Update index** | Indexes the photos (new photos included) and then asks for missing details, see below |
+| **Settings…** | Photo folder, home location, time zone, interval, clock alignment, language (Suomi / English), lock screen |
+| **Open log** | Opens `kulma.log` |
+| **Start with Windows** | Automatic startup on/off |
+| **About…** | Version, libraries, photo library statistics and the 3 most common locations |
+| **Quit** | Closes the app (restart it from the Start Menu) |
+
+**Missing location and time:** after **Update index**, photos that lack a GPS
+location or an EXIF capture time are listed with a preview. Select photos
+(Ctrl/Shift), type a location (a place name like `Turku`, or `60.45, 22.27`)
+and/or a capture time (`2019-06-16 03:57` or `16.6.2019 03:57`) and press
+**Apply to selected**. The answers are saved to `overrides.json`; the photo
+files are never modified.
+
+**Place names** are looked up from OpenStreetMap's Nominatim service. Only a
+location rounded to ~1 km is sent, and the results are cached in `places.json`,
+so each place is looked up only once.
+
+**Lock screen:** by default it shows the same photo as the desktop. The first
+time, Windows switches the lock screen from "Windows Spotlight" to "Picture".
+
+## Settings (`%APPDATA%\Kulma\config.json`)
+
+The settings window covers the common ones; the rest can be edited by hand
+(the app reads the file at every change). See `config.example.json`.
 
 | Field | Description |
 |---|---|
-| `photo_dir` | Photo folder, walked through recursively including subfolders. **Not** the script folder. |
-| `align_to_clock` | Windows tray app only (default `true`): change on the clock (e.g. at :00 and :30 with `interval_minutes` 30) instead of a full interval after the previous change. On Linux the systemd timer decides. |
-| `lock_screen` | Windows only (default `true`): also set the chosen photo as the lock screen image. |
-| `language` | Language of the texts: `fi` (default) or `en`. Affects the log and the indexing output (in the Windows tray app also the menu and windows). The texts are in `bin/kulma_i18n.py`. |
-| `latitude` / `longitude` | Your location. Used to calculate the current sun elevation, and by default for photos that have no GPS EXIF of their own. |
-| `timezone` | IANA time zone (e.g. `Europe/Helsinki`). EXIF does not contain a time zone, so this is used to interpret the capture times of the photos correctly. |
-| `elevation_tolerance` | How many degrees a photo's sun angle may differ from the current one normally (far from the horizon, e.g. midday or deep night). 5-8° is a good starting point. |
-| `twilight_elevation_tolerance` | A stricter tolerance used near the horizon (see `twilight_band`), because the light intensity changes quickly per degree there - without it, clearly brighter dawn/dusk photos could be chosen at night. 2-4° is a good starting point. |
-| `twilight_band` | Within how many degrees of the horizon (0°) the stricter `twilight_elevation_tolerance` is used instead of `elevation_tolerance`. 10-15° is a good starting point. |
-| `azimuth_weight` | How much weight is given to the direction of the sun (not just the elevation). 0 = don't care, 0.05-0.1 = a light effect. |
+| `photo_dir` | Photo folder, walked through recursively |
+| `latitude` / `longitude` | Your location: the current sun elevation, and the location of photos without GPS |
+| `timezone` | IANA time zone (e.g. `Europe/Helsinki`), used to interpret EXIF capture times |
+| `interval_minutes` | Change interval (default 30) |
+| `align_to_clock` | Change on clock boundaries (default `true`), otherwise a full interval after the previous change |
+| `lock_screen` | Also set the lock screen image (default `true`) |
+| `language` | `fi` (default) or `en` |
+| `elevation_tolerance` | How many degrees a photo's sun angle may differ normally (default 6) |
+| `twilight_elevation_tolerance` | Stricter tolerance near the horizon (default 3) |
+| `twilight_band` | Within how many degrees of the horizon the stricter tolerance is used (default 12) |
+| `azimuth_weight` | Weight of the sun's direction in the choice (default 0.05, 0 = ignore) |
 
-### 2. First indexing
-
-```bash
-python3 ~/.local/bin/kulma_index.py
-```
-
-The output tells how many photos were found, how many contained GPS data, and
-what the range of sun angles in your collection is. **If the output warns about
-`mtime_fallback` photos**, their EXIF capture time could not be read (the most
-common cause: HEIC without `pillow-heif`) — the sun angle of these photos is
-probably calculated wrong until the cause is fixed.
-
-### 3. Enable the timers
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now kulma.timer
-systemctl --user enable --now kulma-reindex.timer
-```
-
-If you want the wallpaper to change also while you are not logged in
-(e.g. behind the lock screen):
-```bash
-loginctl enable-linger $USER
-```
-
-After this everything happens by itself: just add photos to the
-`photo_dir` folder, and they are picked up in the next night's indexing.
-
-## Commands for daily use
-
-**Status:**
-```bash
-systemctl --user list-timers                    # when it runs next
-systemctl --user status kulma.service            # the latest run
-```
-
-**Manual runs:**
-```bash
-systemctl --user start kulma.service             # change the wallpaper now
-systemctl --user start kulma-reindex.service      # update the index now
-```
-
-**Logs:**
-```bash
-tail -f ~/.config/kulma/kulma.log                # own log file
-journalctl --user -u kulma.service -f             # systemd's log
-```
-
-**Stopping / disabling:**
-```bash
-systemctl --user disable --now kulma.timer
-systemctl --user disable --now kulma-reindex.timer
-```
-
-**More frequent changing** (e.g. 15 min instead of an hour) — edit
-`~/.config/systemd/user/kulma.timer`:
-```ini
-[Timer]
-OnCalendar=*:0/15
-```
-and then:
-```bash
-systemctl --user daemon-reload
-systemctl --user restart kulma.timer
-```
-
-## File layout after installation
+## Files
 
 ```
-~/.local/bin/
-  kulma_index.py
-  kulma_wallpaper.py
-  kulma_i18n.py         # texts (fi/en)
-~/.config/kulma/
+%LOCALAPPDATA%\Kulma\
+  Kulma.exe
+  cache\converted\      # JPEG conversions of HEIC photos (Windows cannot show HEIC as a wallpaper)
+  icon\kulma.png, .ico  # optional own icon; without it a sun is drawn
+%APPDATA%\Kulma\
   config.json           # settings
-  index.json            # photo index (created automatically)
-  last_choice.json      # previous choice and round history, prevents repeats
-  overrides.json        # locations/capture times entered by hand (optional)
-  kulma.log             # log file
-~/.config/systemd/user/
-  kulma.service
-  kulma.timer
-  kulma-reindex.service
-  kulma-reindex.timer
-~/.cache/kulma/converted/
-  <photo name>.jpg      # JPEG conversions made automatically from HEIC/HEIF photos
+  index.json            # photo index
+  overrides.json        # locations/capture times entered by hand
+  places.json           # place name cache
+  last_choice.json      # current photo and the round history
+  kulma.log
 ```
 
-## HEIC/HEIF photos and displaying the wallpaper
+## Development
 
-GNOME's own wallpaper rendering (`gdk-pixbuf`) does not support the HEIC/HEIF
-format at all on most Linux distributions (it is missing by default for
-patent reasons), even though Kulma itself can read the EXIF data of HEIC files
-through `pillow-heif` in the indexing phase. If a HEIC photo were set directly
-as the wallpaper, the `gsettings` command would "succeed" but the desktop
-would show nothing new.
-
-For this reason `kulma_wallpaper.py` converts the chosen HEIC/HEIF photo to
-JPEG in the `~/.cache/kulma/converted/` folder before setting it as the
-wallpaper. The conversion is done only once per photo - later runs use the
-already converted file. The folder can be emptied at any time, it is rebuilt
-automatically when needed:
-```bash
-rm -rf ~/.cache/kulma/converted
-```
-
-## Known limitations
-
-- On Linux only GNOME (`gsettings`-based). For other desktop environments the
-  `set_gnome_wallpaper()` function has to be replaced with a corresponding
-  command. Windows has its own implementation, see `windows/README_WINDOWS.md`.
-- The photo collection should be large enough and cover different seasons, so
-  that sun angles are found evenly around the clock and the year. With a small
-  collection many runs fall back to the fallback logic (the nearest candidates
-  from outside the tolerance).
-- GPS EXIF is missing from many photos (e.g. if the location data was removed
-  when sharing). Such photos (and photos that lack an EXIF capture time) are
-  left out of the wallpaper selection until the location and time are entered
-  by hand: on Windows the tray app asks for them, on Linux add them to the file
-  `~/.config/kulma/overrides.json`
-  (`{"<photo path>": {"lat": 60.17, "lon": 24.94, "capture_time": "2019-06-16T03:57:00"}}`)
-  and run `kulma_index.py` again. If no photo has the details, all photos are
-  used (with the default location from config.json as the location).
+The code is in `src/Kulma` (C#, WinForms). `Kulma.exe --selftest` checks the
+sun formula against the stored index and the change timing; `Kulma.exe --index`
+updates the index without the tray.
 
 ## License
 

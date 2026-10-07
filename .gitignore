@@ -6,3 +6,8 @@ last_choice.json
 
 __pycache__/
 *.pyc
+
+# C# build output
+src/Kulma/bin/
+src/Kulma/obj/
+src/Kulma/publish/
