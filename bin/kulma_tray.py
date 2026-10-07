@@ -40,7 +40,7 @@ import kulma_wallpaper as wp  # noqa: E402  (shares the paths, the log and the s
 import kulma_i18n as i18n  # noqa: E402  (UI language)
 from kulma_i18n import t as tr  # noqa: E402
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 GITHUB_URL = "https://github.com/290asd/kulma"
 DEFAULT_INTERVAL_MIN = 30
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -840,7 +840,10 @@ def main():
             pystray.MenuItem(lambda _: time_line() or "", None, enabled=False,
                              visible=lambda _: bool(time_line())),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(lambda _: tr("menu.change"), change_now, default=True),
+            # In the background: the click handler runs on the tray's UI thread, which must never
+            # wait for the lock (a running change would otherwise freeze the whole menu).
+            pystray.MenuItem(lambda _: tr("menu.change"),
+                             lambda *_: threading.Thread(target=change_now, daemon=True).start(), default=True),
             pystray.MenuItem(lambda _: tr("menu.pause"), toggle_pause, checked=lambda _: state["paused"]),
             pystray.MenuItem(lambda _: tr("menu.reindex"), lambda *_: reindex()),
             pystray.Menu.SEPARATOR,

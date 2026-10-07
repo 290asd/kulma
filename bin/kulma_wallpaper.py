@@ -209,9 +209,11 @@ def set_windows_wallpaper(path: Path):
 
     SPI_SETDESKWALLPAPER (20) combined with SPIF_UPDATEINIFILE (1) also
     writes the path to the user profile so that the choice survives a
-    restart, and SPIF_SENDCHANGE (2) sends a WM_SETTINGCHANGE message that
-    makes the desktop redraw immediately (without it the change would only
-    show at the next login).
+    restart. The WM_SETTINGCHANGE notification is broadcast separately with
+    SendMessageTimeoutW instead of the SPIF_SENDCHANGE flag: SPIF_SENDCHANGE
+    waits for every top-level window, so a single unresponsive window (even
+    the tray's own UI thread) would hang the call forever. SMTO_ABORTIFHUNG
+    skips hung windows and the timeout bounds the rest.
 
     Windows natively supports JPEG/PNG/BMP wallpapers, so HEIC/HEIF must be
     converted first here too (see get_display_path) - Windows has no HEIC
@@ -239,21 +241,29 @@ def set_windows_wallpaper(path: Path):
 
     SPI_SETDESKWALLPAPER = 20
     SPIF_UPDATEINIFILE = 0x01
-    SPIF_SENDCHANGE = 0x02
+    HWND_BROADCAST = 0xFFFF
+    WM_SETTINGCHANGE = 0x001A
+    SMTO_ABORTIFHUNG = 0x0002
 
     user32 = ctypes.windll.user32
     user32.SystemParametersInfoW.argtypes = [
         ctypes.c_uint, ctypes.c_uint, ctypes.c_wchar_p, ctypes.c_uint,
     ]
     user32.SystemParametersInfoW.restype = ctypes.c_int
+    user32.SendMessageTimeoutW.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t,
+        ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+    ]
 
     ok = user32.SystemParametersInfoW(
-        SPI_SETDESKWALLPAPER, 0, str(path.resolve()), SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+        SPI_SETDESKWALLPAPER, 0, str(path.resolve()), SPIF_UPDATEINIFILE
     )
     if not ok:
         raise RuntimeError(
             f"SystemParametersInfoW failed (GetLastError={ctypes.GetLastError()})"
         )
+    user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, SPI_SETDESKWALLPAPER, 0,
+                               SMTO_ABORTIFHUNG, 5000, None)
 
 
 # --- Windows lock screen -----------------------------------------------------
